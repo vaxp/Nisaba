@@ -1,0 +1,290 @@
+================================================================================
+Nisaba Engine License
+Sovereign Reciprocal Open Source License — Version 0.1.0
+================================================================================
+
+Copyright (c) 2026 Hussein Jaafar. All rights reserved.
+
+The Nisaba Engine, including its source code, object code, libraries, modules,
+internal components, documentation, and associated materials, is owned by
+Hussein Jaafar, unless a separate written agreement explicitly states otherwise.
+
+This license governs the use, integration, distribution, modification, and
+forking of the Nisaba Engine under a Reciprocal Open-Source (Strong Copyleft)
+framework, designed to ensure full transparency and community freedom while
+safeguarding original ownership, lineage, and sovereign attribution.
+
+
+1. DEFINITIONS
+
+1.1 "Nisaba"
+    "Nisaba" means the Nisaba graphics engine and all components distributed
+    as part of the Nisaba Engine by the copyright owner, including its source
+    code, libraries, modules, renderers, layout systems, text systems, platform
+    backends, codecs, and other engine components.
+
+1.2 "Application"
+    "Application" means software created by a user or third party that uses
+    Nisaba through its permitted interfaces, APIs, libraries, or other
+    integration mechanisms (whether statically or dynamically linked).
+
+    An Application includes its own source code, assets, resources, logic,
+    business logic, plugins, extensions, and other material created
+    independently by the Application developer.
+
+1.3 "Modification"
+    "Modification" means any alteration, addition, deletion, replacement, or
+    other change made directly to the source code of Nisaba, or any derivative
+    engine work based substantially on Nisaba.
+
+    A Modification includes, but is not limited to:
+    - changing existing Nisaba source files;
+    - adding code directly to Nisaba source files;
+    - removing code from Nisaba source files;
+    - changing the implementation of internal Nisaba components;
+    - creating a modified version of the Nisaba source code;
+    - creating a fork of Nisaba.
+
+    Using Nisaba through its public APIs without modifying the Nisaba engine
+    source files does not constitute a Modification.
+
+
+2. GRANT OF USE
+
+Subject to the terms of this License, the copyright owner grants the user a
+perpetual, worldwide, non-exclusive, royalty-free license to use Nisaba for the
+purpose of developing, building, testing, running, and distributing
+Applications.
+
+Permitted use includes:
+- personal projects;
+- educational and academic projects;
+- open-source Applications;
+- closed-source and proprietary Applications;
+- commercial Applications and products;
+- internal corporate software;
+- products, embedded devices, and services built using Nisaba;
+- distribution of Applications that use Nisaba.
+
+The user may integrate Nisaba into an Application through any permitted
+integration method, including both static linking and dynamic linking, without
+subjecting the Application itself to this License.
+
+
+3. DISTRIBUTION OF NISABA WITH APPLICATIONS
+
+The user may distribute the authorized Nisaba components required by an
+Application together with that Application, including precompiled binaries or
+source code necessary for the Application to operate.
+
+1. Unmodified Distribution:
+   The user may freely distribute unmodified Nisaba components with any
+   Application under Section 2.
+
+2. Modified Distribution:
+   Any distribution of a modified version of Nisaba, whether bundled with an
+   Application or as a standalone engine, must strictly comply with the
+   Reciprocal Copyleft obligations set forth in Section 5.
+
+
+4. APPLICATION INDEPENDENCE & SOURCE CODE PROTECTION
+
+The source code of an Application remains under the absolute control and
+ownership of its author or applicable copyright owner.
+
+Use of Nisaba in an Application (whether via static linking, dynamic linking,
+or compile-time embedding) does not:
+- transfer ownership of Application source code to Hussein Jaafar;
+- require disclosure or publication of the Application's proprietary source code;
+- require an Application to become open source;
+- require an Application to be licensed under this License;
+- require the author of an Application to publish modifications made to their
+  own Application code.
+
+An Application developer retains the exclusive right to choose the licensing
+and commercial terms under which their Application is distributed.
+
+
+5. RIGHT TO MODIFY & RECIPROCAL COPYLEFT OBLIGATIONS
+
+Subject to the terms of this License, the user is granted the right to modify
+the Nisaba source code, create derived engine works, and maintain forks of
+Nisaba, provided that any such Modification satisfies all of the following
+reciprocal conditions:
+
+1. Share-Alike / Same License:
+   Any modified version, fork, or derivative work based on Nisaba must be
+   distributed strictly under the terms of this exact Nisaba Engine License.
+   No recipient or distributor may re-license, sub-license, or apply
+   closed-source/proprietary terms to Nisaba source code.
+
+2. Public Source Disclosure:
+   Anyone who distributes, conveys, or makes publicly accessible a modified
+   version or fork of Nisaba (whether in source code, shared library, static
+   archive, or compiled binary form) must make the complete corresponding
+   source code of all modifications publicly and freely available under this
+   License.
+
+3. Preservation of Copyright Notices:
+   All modified files and releases must retain intact all original copyright
+   notices, author attributions, and license declarations pointing to
+   Hussein Jaafar.
+
+4. Prominent Modification Notices:
+   Any modified source file must contain prominent notices stating clearly
+   that the file has been modified, identifying the nature of the modifications
+   and the date of modification.
+
+5. No Additional Restrictions:
+   No user or distributor may impose any further restrictions, licensing fees,
+   or patent covenants that limit the freedoms granted by this License to
+   downstream recipients.
+
+
+6. PROHIBITED ACTS
+
+The user may not:
+
+1. distribute any modified version or fork of Nisaba under a proprietary,
+   closed-source, or copyleft-incompatible license;
+2. withhold, conceal, or fail to provide the complete source code of any
+   distributed modified version of Nisaba;
+3. remove, alter, or obscure any copyright notice, author attribution, or
+   license text belonging to Hussein Jaafar;
+4. use the trademark, logo, or official name "Nisaba" or "vaxp" to endorse,
+   market, or represent a third-party fork or modified version as the official
+   Nisaba Engine release;
+5. misrepresent the origin of the software or claim authorship of the original
+   Nisaba Engine;
+6. restrict downstream users from exercising any of the rights granted under
+   this License.
+
+
+7. APPLICATION DEVELOPMENT, PLUGINS, AND EXTENSIONS
+
+A user is free to develop Applications, plugins, tools, and extensions using
+Nisaba without obtaining separate permission.
+
+The user may create:
+- proprietary Application code;
+- open-source Application code;
+- commercial plugins and extensions;
+- custom renderers or backends operating as independent modules;
+- tools, asset pipelines, and editors.
+
+Plugins, extensions, and custom modules developed independently that interface
+with Nisaba through public headers or APIs do not constitute a Modification of
+Nisaba and remain the exclusive intellectual property of their respective
+creators.
+
+
+8. COMMERCIAL FREEDOM FOR APPLICATIONS
+
+The use of Nisaba in an Application does not restrict the Application
+developer from monetizing, selling, or distributing that Application
+commercially.
+
+This License establishes zero royalty obligations, zero revenue-sharing
+requirements, and zero runtime fees for Applications built with Nisaba.
+
+
+9. OWNERSHIP & LINEAGE
+
+All copyright and intellectual property rights in the original Nisaba Engine
+remain the exclusive property of Hussein Jaafar.
+
+No provision of this License transfers ownership of the original Nisaba
+Engine, its architecture, its trademarks, or its sovereign design to any user,
+licensee, or contributor.
+
+Downstream forks and derivative works are recognized as derivative works
+belonging in lineage to the original Nisaba Engine, and must acknowledge
+Hussein Jaafar as the creator and original copyright holder in all
+distributions and documentation.
+
+
+10. TRADEMARK PROTECTION & FORK NAMING
+
+This License does not grant any right or license to use the trademarks, service
+marks, project names, or logos of "Nisaba" or "vaxp", except as required for
+reasonable and customary attribution of software origin.
+
+Any public fork or derived engine distributed by a third party must:
+1. adopt a distinct and substantially different name (e.g., must not be named
+   simply "Nisaba" or "Official Nisaba");
+2. include a prominent notice stating: "This project is an unofficial derivative
+   work based on the Nisaba 2D Graphics Engine, created and copyrighted by
+   Hussein Jaafar."
+
+
+11. DUAL-LICENSING & COMMERCIAL EXCEPTIONS
+
+The copyright owner (Hussein Jaafar) reserves the right to offer separate
+commercial licenses granting exemptions from the Reciprocal Copyleft
+obligations of Section 5.
+
+Under a Separate Commercial License, an organization or enterprise may:
+- maintain private, proprietary modifications to the Nisaba Engine without
+  public source code disclosure;
+- integrate modified Nisaba engine code into closed-source embedded firmware or
+  proprietary software distributions;
+- receive dedicated technical support, guaranteed service-level agreements (SLA),
+  and custom feature engineering;
+- receive formal commercial warranties and intellectual property
+  indemnification.
+
+The existence of this open-source license does not limit the copyright owner's
+legal authority to enter into separate commercial arrangements.
+
+
+12. PATENT PROTECTION & PEACE
+
+Each contributor and distributor grants recipients a perpetual, worldwide,
+royalty-free patent license under patents owned or controlled by that entity
+that are necessarily infringed by their contributions to Nisaba.
+
+If any party institutes patent litigation or legal claims against Hussein
+Jaafar, Nisaba, or any user alleging that Nisaba infringes their patents, all
+patent and copyright licenses granted to that party under this License shall
+terminate immediately.
+
+
+13. TERMINATION
+
+The rights granted under this License terminate automatically if the user fails
+to comply with any of its terms and conditions, particularly the Reciprocal
+Copyleft requirements of Section 5 or the Attribution requirements of
+Section 6.
+
+Upon termination, the user must cease all distribution of Nisaba and its
+derivative works. Reinstatement of rights may be granted upon full cure of the
+violation.
+
+Termination of a user's license does not affect the valid licenses of downstream
+recipients who received Nisaba or Applications in good faith compliance with
+this License.
+
+
+14. DISCLAIMER OF WARRANTY
+
+Nisaba is provided on an "AS IS" basis, without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose, and non-infringement.
+
+The entire risk as to the quality and performance of the engine is with the
+user.
+
+
+15. LIMITATION OF LIABILITY
+
+In no event and under no legal theory shall Hussein Jaafar or any contributor
+be liable to any user for damages, including any direct, indirect, special,
+incidental, or consequential damages of any character arising out of the use or
+inability to use Nisaba, even if advised of the possibility of such damages.
+
+
+16. COPYRIGHT & ATTRIBUTION NOTICE
+
+Nisaba 2D Graphics Engine
+Copyright (c) 2026 Hussein Jaafar. All rights reserved.
+Licensed under the Nisaba Sovereign Reciprocal Open Source License, Version 0.1.0.

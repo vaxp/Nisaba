@@ -1,0 +1,222 @@
+#pragma once
+
+#include "nisaba/gpu/types.hpp"
+#include "nisaba/gpu/renderer.hpp"
+#include "nisaba/path/stroker.hpp"
+#include <memory>
+#include <vector>
+#include "nisaba/text/font_system.hpp"
+#include "nisaba/text/glyph_cache.hpp"
+#include <unordered_map>
+#include <string>
+
+namespace nisaba::gpu {
+
+struct State {
+	CompositeOperationState compositeOperation;
+	bool shapeAntiAlias{true};
+	Paint fill;
+	Paint stroke;
+	float strokeWidth{1.0f};
+	float miterLimit{10.0f};
+	LineCap lineCap{LineCap::Butt};
+	LineJoin lineJoin{LineJoin::Miter};
+	float alpha{1.0f};
+	Transform2D xform{Transform2D::identity()};
+	Scissor scissor;
+	float fontSize{16.0f};
+	float letterSpacing{0.0f};
+	float lineHeight{1.0f};
+	float fontBlur{0.0f};
+	Align textAlign{Align::Left | Align::Baseline};
+	int fontId{0};
+};
+
+class Context {
+public:
+	explicit Context(std::unique_ptr<Renderer> renderer, int flags = Antialias | StencilStrokes);
+	~Context();
+
+	Renderer* renderer() const { return m_renderer.get(); }
+
+	// Frame Lifecycle
+	void beginFrame(float windowWidth, float windowHeight, float devicePixelRatio);
+	void cancelFrame();
+	void endFrame();
+
+	// State Handling
+	void save();
+	void restore();
+	void reset();
+
+	// State Setting
+	void shapeAntiAlias(bool enabled);
+	void strokeColor(Color color);
+	void strokePaint(const Paint& paint);
+	void fillColor(Color color);
+	void fillPaint(const Paint& paint);
+	void miterLimit(float limit);
+	void strokeWidth(float size);
+	void lineCap(LineCap cap);
+	void lineCap(nisaba::LineCap cap);
+	void lineJoin(LineJoin join);
+	void lineJoin(nisaba::LineJoin join);
+	void globalAlpha(float alpha);
+
+	// Transforms
+	void resetTransform();
+	void transform(float a, float b, float c, float d, float e, float f);
+	void transform(const Transform2D& t);
+	void transform(const nisaba::Transform& ts);
+	void translate(float x, float y);
+	void rotate(float angleRad);
+	void skewX(float angleRad);
+	void skewY(float angleRad);
+	void scale(float x, float y);
+	Transform2D currentTransform() const;
+
+	// Scissoring
+	void scissor(float x, float y, float w, float h);
+	void scissorScreen(float x, float y, float w, float h);
+	void intersectScissor(float x, float y, float w, float h);
+	void resetScissor();
+
+	// Global Compositing
+	void globalCompositeOperation(CompositeOperation op);
+	void globalCompositeBlendFunc(BlendFactor sfactor, BlendFactor dfactor);
+	void globalCompositeBlendFuncSeparate(BlendFactor srcRGB, BlendFactor dstRGB, BlendFactor srcAlpha, BlendFactor dstAlpha);
+
+	// Image Creation
+	int createImage(const char* filename, int imageFlags = 0);
+	int createImageMem(int imageFlags, unsigned char* data, int ndata);
+	int createImageRGBA(int w, int h, int imageFlags, const unsigned char* data);
+	void updateImage(int image, const unsigned char* data);
+	void imageSize(int image, int& w, int& h);
+	void deleteImage(int image);
+
+	// Paints
+	Paint linearGradient(float sx, float sy, float ex, float ey, Color icol, Color ocol);
+	Paint boxGradient(float x, float y, float w, float h, float r, float f, Color icol, Color ocol);
+	Paint radialGradient(float cx, float cy, float inr, float outr, Color icol, Color ocol);
+	Paint imagePattern(float cx, float cy, float w, float h, float angleRad, int image, float alpha);
+
+	// Paths
+	void beginPath();
+	void path(const nisaba::Path& p);
+	void moveTo(float x, float y);
+	void lineTo(float x, float y);
+	void bezierTo(float c1x, float c1y, float c2x, float c2y, float x, float y);
+	void quadTo(float cx, float cy, float x, float y);
+	void arcTo(float x1, float y1, float x2, float y2, float radius);
+	void closePath();
+	void pathWinding(Winding dir);
+
+	void arc(float cx, float cy, float r, float a0, float a1, Winding dir);
+	void rect(float x, float y, float w, float h);
+	void roundedRect(float x, float y, float w, float h, float r);
+	void roundedRectVarying(float x, float y, float w, float h, float radTopLeft, float radTopRight, float radBottomRight, float radBottomLeft);
+	void ellipse(float cx, float cy, float rx, float ry);
+	void circle(float cx, float cy, float r);
+
+	// Draw Operations
+	void fill();
+	void stroke();
+
+	// Fonts & Text
+	int createFont(const char* name, const char* filename);
+	int createFontAtIndex(const char* name, const char* filename, const int fontIndex);
+	int createFontMem(const char* name, unsigned char* data, int ndata, int freeData);
+	int createFontMemAtIndex(const char* name, unsigned char* data, int ndata, int freeData, const int fontIndex);
+	int findFont(const char* name);
+	int addFallbackFontId(int baseFont, int fallbackFont);
+	int addFallbackFont(const char* baseFont, const char* fallbackFont);
+	void resetFallbackFontsId(int baseFont);
+	void resetFallbackFonts(const char* baseFont);
+
+	void fontSize(float size);
+	void fontBlur(float blur);
+	void textLetterSpacing(float spacing);
+	void textLineHeight(float lineHeight);
+	void textAlign(Align align);
+	void fontFaceId(int font);
+	void fontFace(const char* font);
+
+	float text(float x, float y, const char* string, const char* end = nullptr);
+	void textBox(float x, float y, float breakRowWidth, const char* string, const char* end = nullptr);
+	float textBounds(float x, float y, const char* string, const char* end, float* bounds);
+	void textBoxBounds(float x, float y, float breakRowWidth, const char* string, const char* end, float* bounds);
+	int textGlyphPositions(float x, float y, const char* string, const char* end, GlyphPosition* positions, int maxPositions);
+	void textMetrics(float* ascender, float* descender, float* lineh);
+	int textBreakLines(const char* string, const char* end, float breakRowWidth, TextRow* rows, int maxRows);
+
+private:
+	State& currentState() { return m_states.back(); }
+	const State& currentState() const { return m_states.back(); }
+
+	void appendCommand(const PathCommand& cmd);
+	void setPaintColor(Paint& p, Color color);
+
+	std::unique_ptr<Renderer> m_renderer;
+	class Tessellator* m_tessellator{nullptr};
+	std::unique_ptr<class SovereignGlyphAtlas> m_atlas;
+	int m_fontTextureId{0};
+	text::FontSystem m_fontSystem;
+	text::GlyphCache m_glyphCache;
+	std::unordered_map<std::string, int> m_fontNames;
+	std::unordered_map<int, std::vector<int>> m_fallbacks;
+
+	const text::TtfFont* resolveGlyphFont(int primaryFontId, char32_t cp, uint16_t* outGlyphId) const;
+	std::vector<struct MeasuredGlyph> layoutGlyphs(const State& s, float scaledSize, const char* string, const char* end, float* outTotalWidth) const;
+
+	std::vector<State> m_states;
+	std::vector<PathCommand> m_commands;
+	float m_commandX{0.0f};
+	float m_commandY{0.0f};
+
+	float m_distTol{0.01f};
+	float m_tessTol{0.25f};
+	float m_fringeWidth{1.0f};
+	float m_devicePixelRatio{1.0f};
+	float m_windowWidth{0.0f};
+	float m_windowHeight{0.0f};
+	int m_flags{0};
+
+	mutable std::vector<RenderPath> m_renderPaths;
+	mutable std::vector<Vertex> m_textVertices;
+	bool m_singleCircle{false};
+	float m_circleCx{0.0f};
+	float m_circleCy{0.0f};
+	float m_circleR{0.0f};
+
+	bool m_singleRect{false};
+	float m_rectX{0.0f};
+	float m_rectY{0.0f};
+	float m_rectW{0.0f};
+	float m_rectH{0.0f};
+
+	bool m_singleRRect{false};
+	float m_rrectX{0.0f};
+	float m_rrectY{0.0f};
+	float m_rrectW{0.0f};
+	float m_rrectH{0.0f};
+	float m_rrectR{0.0f};
+
+	bool m_singleVaryingRRect{false};
+	float m_radTL{0.0f};
+	float m_radTR{0.0f};
+	float m_radBR{0.0f};
+	float m_radBL{0.0f};
+
+	bool m_singleEllipse{false};
+	float m_ellipseCx{0.0f};
+	float m_ellipseCy{0.0f};
+	float m_ellipseRx{0.0f};
+	float m_ellipseRy{0.0f};
+
+	void materializePending();
+	void rectPath(float x, float y, float w, float h);
+	void ellipsePath(float cx, float cy, float rx, float ry);
+	void roundedRectVaryingPath(float x, float y, float w, float h, float radTopLeft, float radTopRight, float radBottomRight, float radBottomLeft);
+};
+
+} // namespace nisaba::gpu

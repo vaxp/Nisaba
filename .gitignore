@@ -1,0 +1,17 @@
+# Third-party libraries & external dependencies
+third_party/
+# Build directories & compilation artifacts
+build/
+nisaba-layout/build/
+*.o
+*.a
+*.so
+*.spv
+
+# Temporary and editor files
+.cache/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
