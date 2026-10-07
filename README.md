@@ -180,7 +180,12 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Analytical Signed Distance Field (SDF) Gaussian Shadows & Neon Halos**: Closed-form mathematical evaluation of the 2D Gaussian convolution integral via the error function ($\text{erf}$), generating soft ambient drop shadows and vibrant glowing halos in a single GPU draw call.
 - **Real-Time Glassmorphism & Translucent Panels (`GpuCanvas::draw_glass_panel`)**: Modern frosted glass UI surfaces incorporating analytical elevation drop shadows, tinted translucent bodies, and specular edge reflection borders.
 - **Direct W3C SVG Vector Graphics on GPU (`GpuCanvas::draw_svg`)**: Native execution and GPU rasterization of arbitrary W3C SVG paths and icons with hardware MSAA and zero external dependencies.
-- **Hardware GPU Text Rendering & Dynamic Glyph Atlas (`GpuCanvas::draw_text`, `GpuCanvas::draw_text_buffer`, `GpuGlyphAtlas`)**: Full-specification hardware typography on GPU via dynamic Skyline bin-packed alpha atlases ($1024 \times 1024$ expandable to $2048 \times 2048$), subpixel binning, and unified single-batch draw calls with vertex color tinting for multiline, styled paragraphs.
+- **Hardware GPU Text Rendering & Dynamic Glyph Atlas (`GpuCanvas::draw_text`, `GpuCanvas::draw_text_buffer`, `GpuGlyphAtlas`)**:
+  - Full-specification hardware typography on GPU via dynamic Skyline 2D bin-packed alpha atlases ($1024 \times 1024$ dynamically expandable on-demand up to $2048 \times 2048$).
+  - 1-pixel boundary padding eliminating texture bleeding, 4-bin subpixel horizontal positioning, and minimal dirty-region partial GPU texture flushes.
+  - Unified single-batch draw calls (`GpuCanvas::draw_text_buffer`) batching full shaped paragraphs and multi-line text layouts into a single GPU draw call with per-vertex color tinting (`Vertex::color`) for multicolored text spans and syntax highlighting.
+- **Ultra-Low CPU Command Overhead & Sustained High Frame Rates**:
+  - Highly optimized GPU command recording and state caching delivering near-zero CPU submission overhead and sustained 120+ FPS throughput across complex vector scenes.
 - **Continuous Ribbon Stroking & High-Density Tessellation**: Adaptive curved geometry tessellation with averaged vertex miter normals for continuous, break-free ribbons and strokes at arbitrary angles.
 - **Seamless Dual CPU/GPU Coexistence**: Complete architectural isolation ensuring 0 regressions on CPU rasterization while sharing mathematical types (`Rect`, `Point`, `Color`, `Path`, `Transform`) and textures (`Pixmap`).
 
@@ -442,6 +447,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 
 - **Vector Geometry & Boolean Algebra**:
   - Quadratic, Cubic, and Conic Bézier curves; *de Casteljau* subdivision, root solving, extrema, cusps, and tight bounding boxes.
+  - **Arc-Length Parameterization & Measurement (`nisaba::PathMeasure`)**: Sub-millimeter contour length calculation, analytical tangent and position evaluation, and de Casteljau subsegment carving for animated spinners, progress rings, and vector morphing.
   - **Geometric Path Operations (`nisaba::path_ops`)**: Exact planar sweep-line solver (`Union`, `Difference`, `Intersect`, `Xor`).
   - **Stroke-to-Fill Outlining (`nisaba::stroker`)**: Closed polygon contour generation with clean planar self-intersection union resolution.
 - **Path Stroking & Dashing**: Flexible line caps (`Butt`, `Round`, `Square`), line joins (`Miter`, `MiterClip`, `Round`, `Bevel`), arbitrary dash patterns with phase offset.

@@ -15,6 +15,13 @@ test_path_exe = executable('test_path',
 )
 test('path_test', test_path_exe)
 
+# PathMeasure arc-length & parameterization unit tests
+test_path_measure_exe = executable('test_path_measure',
+  'test_path_measure.cpp',
+  dependencies : nisaba_dep
+)
+test('path_measure_test', test_path_measure_exe)
+
 # PathOps boolean operations unit tests
 test_path_ops_exe = executable('test_path_ops',
   'test_path_ops.cpp',

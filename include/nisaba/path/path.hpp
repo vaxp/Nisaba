@@ -14,6 +14,7 @@
 namespace nisaba {
 
 class PathBuilder;
+class PathMeasure;
 enum class PathOp : uint8_t;
 struct Stroke;
 namespace text {
@@ -261,6 +262,7 @@ private:
     Rect bounds_;
 
     friend class PathBuilder;
+    friend class PathMeasure;
     friend class PathSegmentsIter;
     friend class text::TtfFont;
 };

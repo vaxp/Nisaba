@@ -21,6 +21,7 @@ nisaba_sources = files(
   'src/path/dash.cpp',
   'src/path/stroker.cpp',
   'src/path/path_ops.cpp',
+  'src/path/path_measure.cpp',
   'src/canvas/pixmap.cpp',
   'src/raster/line_clipper.cpp',
   'src/raster/edge.cpp',

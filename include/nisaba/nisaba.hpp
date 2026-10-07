@@ -18,6 +18,7 @@
 #include "nisaba/path/dash.hpp"
 #include "nisaba/path/stroker.hpp"
 #include "nisaba/path/path_ops.hpp"
+#include "nisaba/path/path_measure.hpp"
 #include "nisaba/math/screen_int_rect.hpp"
 #include "nisaba/raster/fixed_point.hpp"
 #include "nisaba/color/color.hpp"
