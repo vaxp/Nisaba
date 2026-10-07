@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include "nisaba/text/font_system.hpp"
+#include "nisaba/text/buffer.hpp"
 #include "nisaba/text/glyph_cache.hpp"
 #include <unordered_map>
 #include <string>
@@ -142,12 +143,23 @@ public:
 	void fontFace(const char* font);
 
 	float text(float x, float y, const char* string, const char* end = nullptr);
+	float textWithFont(float x, float y, const text::TtfFont& font, float fontSize, const char* string, const char* end = nullptr);
+	void drawTextBuffer(const text::Buffer& buffer, text::FontSystem& fontSystem, Point pos = Point{0.0f, 0.0f}, Color defaultColor = Color::rgba(0, 0, 0, 255));
 	void textBox(float x, float y, float breakRowWidth, const char* string, const char* end = nullptr);
 	float textBounds(float x, float y, const char* string, const char* end, float* bounds);
 	void textBoxBounds(float x, float y, float breakRowWidth, const char* string, const char* end, float* bounds);
 	int textGlyphPositions(float x, float y, const char* string, const char* end, GlyphPosition* positions, int maxPositions);
 	void textMetrics(float* ascender, float* descender, float* lineh);
 	int textBreakLines(const char* string, const char* end, float breakRowWidth, TextRow* rows, int maxRows);
+
+	// Typography Subsystem Getters
+	text::FontSystem& fontSystem() noexcept { return m_fontSystem; }
+	const text::FontSystem& fontSystem() const noexcept { return m_fontSystem; }
+	text::GlyphCache& glyphCache() noexcept { return m_glyphCache; }
+	const text::GlyphCache& glyphCache() const noexcept { return m_glyphCache; }
+	class SovereignGlyphAtlas& atlas() noexcept { return *m_atlas; }
+	const class SovereignGlyphAtlas& atlas() const noexcept { return *m_atlas; }
+	int fontTextureId() const noexcept { return m_fontTextureId; }
 
 private:
 	State& currentState() { return m_states.back(); }
@@ -166,6 +178,7 @@ private:
 	std::unordered_map<int, std::vector<int>> m_fallbacks;
 
 	const text::TtfFont* resolveGlyphFont(int primaryFontId, char32_t cp, uint16_t* outGlyphId) const;
+	std::vector<struct MeasuredGlyph> layoutGlyphsInternal(const State& s, const text::TtfFont* primaryFont, uint32_t fontId, float scaledSize, float fontSize, const char* string, const char* end, float* outTotalWidth) const;
 	std::vector<struct MeasuredGlyph> layoutGlyphs(const State& s, float scaledSize, const char* string, const char* end, float* outTotalWidth) const;
 
 	std::vector<State> m_states;

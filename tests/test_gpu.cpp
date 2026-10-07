@@ -1,7 +1,11 @@
 #include <cassert>
 #include <iostream>
 #include <cmath>
+#include <fstream>
 #include "nisaba/nisaba.hpp"
+#include "nisaba/text/ttf_font.hpp"
+#include "nisaba/text/buffer.hpp"
+#include "nisaba/text/font_system.hpp"
 
 using namespace nisaba;
 using nisaba::gpu::GpuVertex;
@@ -20,6 +24,19 @@ const Color BLUE = Color::from_rgba8(0, 0, 255, 255);
 const Color YELLOW = Color::from_rgba8(255, 255, 0, 255);
 const Color CYAN = Color::from_rgba8(0, 255, 255, 255);
 const Color MAGENTA = Color::from_rgba8(255, 0, 255, 255);
+
+std::string resolve_test_font(std::string_view filename) {
+    std::vector<std::string> candidates = {
+        std::string("fonts/") + std::string(filename),
+        std::string("../fonts/") + std::string(filename),
+        std::string("../../fonts/") + std::string(filename)
+    };
+    for (const auto& path : candidates) {
+        std::ifstream f(path, std::ios::binary);
+        if (f.good()) return path;
+    }
+    return candidates[0];
+}
 } // namespace
 
 void test_gpu_types() {
@@ -333,6 +350,141 @@ void test_gpu_cpu_coexistence() {
     std::cout << "  -> Seamless CPU and GPU coexistence OK" << std::endl;
 }
 
+void test_gpu_text_rendering() {
+    std::cout << "Testing GPU hardware text rendering..." << std::endl;
+
+    std::string font_path = resolve_test_font("NotoSans-Regular.ttf");
+    auto font = text::TtfFont::from_file(font_path);
+    assert(font != nullptr);
+
+    auto device = GpuDevice::create();
+    auto surface = GpuSurface::create(device, 400, 200);
+    assert(surface != nullptr);
+
+    GpuCanvas canvas(surface);
+    canvas.clear(Color::WHITE);
+
+    // 1. Draw text directly using text::Font & Paint
+    canvas.draw_text("Nisaba GPU Hardware Text", 20.0f, 60.0f, *font, Paint(RED), 28.0f);
+
+    // 2. Register font by name on canvas context and draw with font name
+    int font_id = canvas.create_font("test_sans", font_path.c_str());
+    assert(font_id > 0);
+    canvas.draw_text(20.0f, 120.0f, "Rendered With Font Face", Paint(BLUE), 24.0f, "test_sans");
+
+    canvas.flush();
+
+    // 3. Readback and verify actual text glyph pixels were drawn
+    auto readback = surface->to_pixmap();
+    assert(readback.has_value());
+    assert(readback->width() == 400);
+    assert(readback->height() == 200);
+
+    size_t non_white_pixels = 0;
+    size_t red_tinted = 0;
+    size_t blue_tinted = 0;
+
+    for (uint32_t y = 0; y < readback->height(); ++y) {
+        for (uint32_t x = 0; x < readback->width(); ++x) {
+            auto opt = readback->as_ref().pixel(x, y);
+            if (opt && (opt->r < 240 || opt->g < 240 || opt->b < 240)) {
+                non_white_pixels++;
+                if (opt->r > 128 && opt->g < 100 && opt->b < 100) {
+                    red_tinted++;
+                }
+                if (opt->b > 128 && opt->g < 100 && opt->r < 100) {
+                    blue_tinted++;
+                }
+            }
+        }
+    }
+
+    assert(non_white_pixels > 100);
+    assert(red_tinted > 30);
+    assert(blue_tinted > 30);
+
+    // Verify atlas texture was flushed
+    assert(canvas.context() != nullptr);
+    assert(canvas.context()->atlas().isDirty() == false);
+
+    std::cout << "  -> GPU hardware text rendering OK (" << non_white_pixels << " text pixels rendered)" << std::endl;
+}
+
+void test_gpu_text_buffer_rendering() {
+    std::cout << "Testing GPU hardware text buffer & paragraph rendering..." << std::endl;
+
+    std::string font_path = resolve_test_font("NotoSans-Regular.ttf");
+    text::FontSystem font_system;
+    auto fid = font_system.load_font_file(font_path);
+    assert(fid.has_value());
+    font_system.set_default_font(*fid);
+
+    text::Buffer buffer(text::Metrics(20.0f, 26.0f));
+    buffer.set_size(300.0f, std::nullopt);
+    buffer.set_text("Nisaba Sovereign Graphics Engine hardware text layout paragraph test for ENKI.");
+
+    auto device = GpuDevice::create();
+    auto surface = GpuSurface::create(device, 350, 200);
+    assert(surface != nullptr);
+
+    GpuCanvas canvas(surface);
+    canvas.clear(Color::BLACK);
+
+    // Draw full text buffer with default green color
+    canvas.draw_text_buffer(buffer, font_system, Point(20.0f, 30.0f), GREEN);
+    canvas.flush();
+
+    auto readback = surface->to_pixmap();
+    assert(readback.has_value());
+
+    size_t green_pixels = 0;
+    for (uint32_t y = 0; y < readback->height(); ++y) {
+        for (uint32_t x = 0; x < readback->width(); ++x) {
+            auto opt = readback->as_ref().pixel(x, y);
+            if (opt && opt->g > 75 && opt->r < 50 && opt->b < 50) {
+                green_pixels++;
+            }
+        }
+    }
+
+    assert(green_pixels > 200);
+
+    // Test text buffer with styled colored spans
+    text::Attrs red_attrs;
+    red_attrs.set_color(text::TextColor::rgb(255, 0, 0));
+    text::Attrs blue_attrs;
+    blue_attrs.set_color(text::TextColor::rgb(0, 0, 255));
+
+    text::Buffer styled_buffer(text::Metrics(24.0f, 30.0f));
+    styled_buffer.set_text("RedWord BlueWord");
+    if (!styled_buffer.lines().empty()) {
+        styled_buffer.lines_mut()[0].attrs_list_mut().add_span(0, 7, red_attrs);
+        styled_buffer.lines_mut()[0].attrs_list_mut().add_span(8, 16, blue_attrs);
+    }
+
+    canvas.clear(Color::BLACK);
+    canvas.draw_text_buffer(styled_buffer, font_system, Point(20.0f, 40.0f), Color::WHITE);
+    canvas.flush();
+
+    auto styled_readback = surface->to_pixmap();
+    assert(styled_readback.has_value());
+
+    size_t red_glyph_pixels = 0;
+    size_t blue_glyph_pixels = 0;
+    for (uint32_t y = 0; y < styled_readback->height(); ++y) {
+        for (uint32_t x = 0; x < styled_readback->width(); ++x) {
+            auto opt = styled_readback->as_ref().pixel(x, y);
+            if (opt && opt->r > 100 && opt->g < 60 && opt->b < 60) red_glyph_pixels++;
+            if (opt && opt->b > 100 && opt->g < 60 && opt->r < 60) blue_glyph_pixels++;
+        }
+    }
+
+    assert(red_glyph_pixels > 30);
+    assert(blue_glyph_pixels > 30);
+
+    std::cout << "  -> GPU hardware text buffer rendering OK (Red: " << red_glyph_pixels << ", Blue: " << blue_glyph_pixels << ")" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running Nisaba GPU Rendering Pipeline Test Suite" << std::endl;
@@ -348,9 +500,11 @@ int main() {
     test_gpu_device_and_buffer();
     test_gpu_surface_and_canvas();
     test_gpu_cpu_coexistence();
+    test_gpu_text_rendering();
+    test_gpu_text_buffer_rendering();
 
     std::cout << "========================================" << std::endl;
-    std::cout << "All Nisaba GPU pipeline tests PASSED (10/10)!" << std::endl;
+    std::cout << "All Nisaba GPU pipeline tests PASSED (12/12)!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     return 0;

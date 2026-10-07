@@ -14,3 +14,4 @@
 #include "nisaba/gpu/gpu_surface.hpp"
 #include "nisaba/gpu/gpu_tessellator.hpp"
 #include "nisaba/gpu/gpu_canvas.hpp"
+#include "nisaba/gpu/glyph_atlas.hpp"

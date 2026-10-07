@@ -251,4 +251,7 @@ private:
     std::unique_ptr<OpenTypeGpos> gpos_{nullptr};
 };
 
+/// Standard font alias for TtfFont in Nisaba typography subsystem.
+using Font = TtfFont;
+
 } // namespace nisaba::text

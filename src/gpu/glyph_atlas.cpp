@@ -21,6 +21,15 @@ void SovereignGlyphAtlas::reset() {
     m_dirtyMaxY = m_height;
 }
 
+bool SovereignGlyphAtlas::resize(int newWidth, int newHeight) {
+    if (newWidth <= 0 || newHeight <= 0) return false;
+    m_width = newWidth;
+    m_height = newHeight;
+    m_data.assign(static_cast<size_t>(m_width) * static_cast<size_t>(m_height), 0);
+    reset();
+    return true;
+}
+
 const AtlasGlyphEntry* SovereignGlyphAtlas::find(const text::CacheKey& key) const noexcept {
     auto it = m_entries.find(key);
     if (it != m_entries.end()) {

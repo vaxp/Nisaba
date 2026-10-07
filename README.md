@@ -1,9 +1,16 @@
+<div align="center">
+
+![Nisaba — Full-Stack 2D Graphics Engine](assets/Nisaba-background-banner.jpeg)
+
 # Nisaba — Full-Stack 2D Graphics Engine
+### Sovereign C++20 2D Vector Graphics, Typography, UI Layout & Hardware GPU Engine
 
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Build System](https://img.shields.io/badge/Build-Meson%20%2B%20Ninja-green.svg)](https://mesonbuild.com)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero%20(Sovereign)-brightgreen.svg)](#technological-sovereignty)
 [![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20Windows%20%7C%20Android%20%7C%20WASM%20%7C%20DRM%2FKMS-orange.svg)](#cross-platform)
+
+</div>
 
 **Nisaba** (`nisaba`) is an embedded-first, zero-dependency, ultra-lightweight 2D graphics rendering and layout engine written from scratch in **Modern C++ (C++20)**, featuring multi-backend sovereign rendering (CPU software rasterizer, native **Vulkan** GPU pipeline, and **OpenGL ES 3.2** GPU pipeline), exact geometric path boolean operations (`nisaba::path_ops`), stroke-to-fill path outlining (`nisaba::stroker`), multi-format embedded framebuffers (RGB565, Alpha8, Gray8, BGRA8888, RGBA8888), physical linear-space sRGB color blending, a deterministic 7-stage Flexible Box and UI layout engine (`nisaba-layout`), complete sovereign image codec subsystems, a sovereign Lottie vector animation engine (`nisaba::lottie`), an optional sovereign native OS platform and windowing subsystem (`backend_os`), a sovereign Markdown document layout and multi-page rendering engine (`nisaba::markdown`), and a full-specification sovereign PDF document engine (`nisaba::pdf`). Purpose-built as the native rendering foundation for the **`vaxp`** cross-platform organization.
 
@@ -18,7 +25,7 @@ Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union,
 ![Nisaba Image Codecs Showcase](showcase/nisaba_image_codec_showcase.png)
 
 ### Vector & Shader Rendering Showcase
-![Nisaba Vector Showcase](showcase/nisaba_cpu_showcase_match.png)
+![Nisaba Vector Showcase](showcase/embedded_hmi_showcase.png)
 
 ### Multilingual Typography & Text Layout Showcase
 ![Nisaba Text Showcase](showcase/nisaba_text_showcase.png)
@@ -39,7 +46,7 @@ Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union,
 ![Nisaba 2D Mesh Showcase](showcase/nisaba_mesh_showcase.png)
 
 ### Hardware-Accelerated GPU Rendering Showcase (Vulkan & OpenGL ES 3.2 with 4x MSAA)
-![Nisaba GPU Showcase](showcase/nisaba_gpu_showcase.png)
+![Nisaba GPU Showcase](showcase/example_calculator.png)
 
 ### Sovereign Lottie Vector Animation Engine Showcase (`nisaba::lottie` & Hardware GPU Acceleration)
 ![Nisaba Lottie GPU Showcase](showcase/nisaba_lottie_gpu_showcase.png)
@@ -173,6 +180,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Analytical Signed Distance Field (SDF) Gaussian Shadows & Neon Halos**: Closed-form mathematical evaluation of the 2D Gaussian convolution integral via the error function ($\text{erf}$), generating soft ambient drop shadows and vibrant glowing halos in a single GPU draw call.
 - **Real-Time Glassmorphism & Translucent Panels (`GpuCanvas::draw_glass_panel`)**: Modern frosted glass UI surfaces incorporating analytical elevation drop shadows, tinted translucent bodies, and specular edge reflection borders.
 - **Direct W3C SVG Vector Graphics on GPU (`GpuCanvas::draw_svg`)**: Native execution and GPU rasterization of arbitrary W3C SVG paths and icons with hardware MSAA and zero external dependencies.
+- **Hardware GPU Text Rendering & Dynamic Glyph Atlas (`GpuCanvas::draw_text`, `GpuCanvas::draw_text_buffer`, `GpuGlyphAtlas`)**: Full-specification hardware typography on GPU via dynamic Skyline bin-packed alpha atlases ($1024 \times 1024$ expandable to $2048 \times 2048$), subpixel binning, and unified single-batch draw calls with vertex color tinting for multiline, styled paragraphs.
 - **Continuous Ribbon Stroking & High-Density Tessellation**: Adaptive curved geometry tessellation with averaged vertex miter normals for continuous, break-free ribbons and strokes at arbitrary angles.
 - **Seamless Dual CPU/GPU Coexistence**: Complete architectural isolation ensuring 0 regressions on CPU rasterization while sharing mathematical types (`Rect`, `Point`, `Color`, `Path`, `Transform`) and textures (`Pixmap`).
 

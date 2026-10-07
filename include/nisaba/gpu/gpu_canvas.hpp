@@ -15,6 +15,9 @@
 #include "nisaba/effects/drop_shadow.hpp"
 #include "nisaba/svg/svg_document.hpp"
 #include "nisaba/canvas/canvas_interface.hpp"
+#include "nisaba/text/font_system.hpp"
+#include "nisaba/text/buffer.hpp"
+#include "nisaba/text/ttf_font.hpp"
 
 namespace nisaba::gpu {
 
@@ -89,6 +92,17 @@ public:
 
     // --- SVG Vector Graphics ---
     void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds);
+
+    // --- Typography & Hardware Text Rendering ---
+    void draw_text(std::string_view text, float x, float y, const text::Font& font, const nisaba::Paint& paint, float font_size = 16.0f);
+    void draw_text(float x, float y, std::string_view text, const nisaba::Paint& paint, float font_size = 16.0f, const char* font_name = nullptr);
+    void draw_text_buffer(const text::Buffer& buffer, text::FontSystem& fonts, Point pos = Point{0.0f, 0.0f}, nisaba::Color default_color = nisaba::Color::BLACK);
+    void draw_text_buffer(const text::Buffer& buffer, text::FontSystem& fonts, Point pos, const nisaba::Paint& paint);
+
+    int create_font(const char* name, const char* filename);
+    int create_font_mem(const char* name, const uint8_t* data, size_t size);
+    [[nodiscard]] text::FontSystem* font_system() noexcept { return context_ ? &context_->fontSystem() : nullptr; }
+    [[nodiscard]] const text::FontSystem* font_system() const noexcept { return context_ ? &context_->fontSystem() : nullptr; }
 
     /// Flushes all pending draw operations to the GPU.
     void flush();

@@ -577,4 +577,43 @@ void GpuCanvas::flush(const std::vector<ScreenIntRect>& damage_rects) {
     }
 }
 
+void GpuCanvas::draw_text(std::string_view text, float x, float y, const text::Font& font, const nisaba::Paint& paint, float font_size) {
+    if (!context_ || text.empty()) return;
+    ensure_frame();
+    apply_fill_paint(paint);
+    context_->textWithFont(x, y, font, font_size, text.data(), text.data() + text.size());
+}
+
+void GpuCanvas::draw_text(float x, float y, std::string_view text, const nisaba::Paint& paint, float font_size, const char* font_name) {
+    if (!context_ || text.empty()) return;
+    ensure_frame();
+    apply_fill_paint(paint);
+    context_->fontSize(font_size);
+    if (font_name && font_name[0] != '\0') {
+        context_->fontFace(font_name);
+    }
+    context_->text(x, y, text.data(), text.data() + text.size());
+}
+
+void GpuCanvas::draw_text_buffer(const text::Buffer& buffer, text::FontSystem& fonts, Point pos, nisaba::Color default_color) {
+    if (!context_) return;
+    ensure_frame();
+    context_->drawTextBuffer(buffer, fonts, pos, default_color);
+}
+
+void GpuCanvas::draw_text_buffer(const text::Buffer& buffer, text::FontSystem& fonts, Point pos, const nisaba::Paint& paint) {
+    if (!context_) return;
+    ensure_frame();
+    apply_fill_paint(paint);
+    context_->drawTextBuffer(buffer, fonts, pos, paint.shader.solid_color());
+}
+
+int GpuCanvas::create_font(const char* name, const char* filename) {
+    return context_ ? context_->createFont(name, filename) : -1;
+}
+
+int GpuCanvas::create_font_mem(const char* name, const uint8_t* data, size_t size) {
+    return context_ ? context_->createFontMem(name, const_cast<unsigned char*>(data), static_cast<int>(size), 0) : -1;
+}
+
 } // namespace nisaba::gpu
