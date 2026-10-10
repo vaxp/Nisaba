@@ -31,6 +31,7 @@ struct State {
 	float fontBlur{0.0f};
 	Align textAlign{Align::Left | Align::Baseline};
 	int fontId{0};
+	int clipDepth{0};
 };
 
 class Context {
@@ -81,6 +82,12 @@ public:
 	void scissorScreen(float x, float y, float w, float h);
 	void intersectScissor(float x, float y, float w, float h);
 	void resetScissor();
+
+	// Stencil Vector Clipping
+	void clipPath(const nisaba::Path& p, Winding winding = Winding::CounterClockwise);
+	void restoreClip(int targetDepth);
+	void resetClip();
+	[[nodiscard]] int clipDepth() const noexcept;
 
 	// Global Compositing
 	void globalCompositeOperation(CompositeOperation op);

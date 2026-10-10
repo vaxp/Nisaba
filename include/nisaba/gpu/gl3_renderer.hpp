@@ -42,6 +42,11 @@ public:
 	                     const Scissor& scissor, const Vertex* verts, int nverts,
 	                     float fringe, int shaderType = 3) override;
 
+	void renderClip(const RenderPath* paths, int npaths, Winding winding, int targetDepth,
+	                const Scissor& scissor, const float* bounds) override;
+	void restoreClip(int targetDepth) override;
+	void resetClip() override;
+
 	// OpenGL specific utilities
 	int createTextureFromNativeHandle(uint64_t handle, int w, int h, int imageFlags) override;
 	GpuBackendType backendType() const override { return GpuBackendType::OpenGL; }

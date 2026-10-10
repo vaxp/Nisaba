@@ -76,8 +76,8 @@ Context::Context(std::unique_ptr<Renderer> renderer, int flags)
 		throw std::runtime_error("Failed to initialize GPU renderer");
 	}
 
-	// Initialize Sovereign Glyph Atlas & Font Texture
-	m_atlas = std::make_unique<SovereignGlyphAtlas>(1024, 1024);
+	// Initialize Sovereign Glyph Atlas & Font Texture (2048x2048 for high throughput)
+	m_atlas = std::make_unique<SovereignGlyphAtlas>(2048, 2048);
 	m_fontTextureId = m_renderer->createTexture(TextureType::Alpha, m_atlas->width(), m_atlas->height(), 0, m_atlas->data());
 }
 
@@ -129,7 +129,12 @@ void Context::save() {
 
 void Context::restore() {
 	if (m_states.size() <= 1) return;
+	int curDepth = m_states.back().clipDepth;
 	m_states.pop_back();
+	int targetDepth = m_states.back().clipDepth;
+	if (curDepth > targetDepth && m_renderer) {
+		m_renderer->restoreClip(targetDepth);
+	}
 }
 
 void Context::reset() {
@@ -152,6 +157,7 @@ void Context::reset() {
 	s.lineHeight = 1.0f;
 	s.fontBlur = 0.0f;
 	s.textAlign = Align::Left | Align::Baseline;
+	s.clipDepth = 0;
 	int defFont = findFont("sans");
 	if (defFont <= 0 && !m_fontNames.empty()) {
 		defFont = m_fontNames.begin()->second;
@@ -350,6 +356,68 @@ void Context::intersectScissor(float x, float y, float w, float h) {
 void Context::resetScissor() {
 	currentState().scissor.extent[0] = -1.0f;
 	currentState().scissor.extent[1] = -1.0f;
+}
+
+// -------------------------------------------------------------
+// Stencil Vector Clipping
+// -------------------------------------------------------------
+void Context::clipPath(const nisaba::Path& p, Winding winding) {
+	State& s = currentState();
+	if (s.clipDepth >= 15) return;
+
+	materializePending();
+	m_commands.clear();
+	path(p);
+	materializePending();
+
+	m_tessellator->flattenCommands(m_commands);
+	m_tessellator->expandFill(0.0f, LineJoin::Miter, 2.4f);
+
+	const auto& paths = m_tessellator->contours();
+	const auto& allVerts = m_tessellator->vertices();
+	m_renderPaths.resize(paths.size());
+
+	for (size_t i = 0; i < paths.size(); ++i) {
+		const auto& tp = paths[i];
+		auto& rp = m_renderPaths[i];
+		rp.first = tp.first;
+		rp.count = tp.count;
+		rp.closed = tp.closed;
+		rp.nbevel = tp.nbevel;
+		rp.fill = (tp.fillCount > 0) ? &allVerts[tp.fillOffset] : nullptr;
+		rp.fillCount = tp.fillCount;
+		rp.stroke = nullptr;
+		rp.strokeCount = 0;
+		rp.winding = tp.winding;
+		rp.convex = tp.convex;
+	}
+
+	s.clipDepth++;
+	if (m_renderer) {
+		m_renderer->renderClip(m_renderPaths.data(), static_cast<int>(m_renderPaths.size()),
+		                       winding, s.clipDepth, s.scissor, m_tessellator->bounds());
+	}
+	m_commands.clear();
+}
+
+void Context::restoreClip(int targetDepth) {
+	State& s = currentState();
+	s.clipDepth = targetDepth;
+	if (m_renderer) {
+		m_renderer->restoreClip(targetDepth);
+	}
+}
+
+void Context::resetClip() {
+	State& s = currentState();
+	s.clipDepth = 0;
+	if (m_renderer) {
+		m_renderer->resetClip();
+	}
+}
+
+int Context::clipDepth() const noexcept {
+	return currentState().clipDepth;
 }
 
 // -------------------------------------------------------------
@@ -1548,15 +1616,21 @@ float Context::text(float x, float y, const char* string, const char* end) {
 					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
 					m_textVertices.clear();
 				}
+				if (m_renderer) {
+					m_renderer->flush();
+				}
 				if (m_atlas->width() < 2048 || m_atlas->height() < 2048) {
 					if (m_fontTextureId != 0 && m_renderer) {
 						m_renderer->deleteTexture(m_fontTextureId);
+						m_fontTextureId = 0;
 					}
 					m_atlas->resize(2048, 2048);
+					m_glyphCache.clear();
 					m_fontTextureId = m_renderer->createTexture(TextureType::Alpha, m_atlas->width(), m_atlas->height(), 0, m_atlas->data());
 					inserted = m_atlas->insert(key, cg);
 				} else {
 					m_atlas->reset();
+					m_glyphCache.clear();
 					inserted = m_atlas->insert(key, cg);
 				}
 			}
@@ -1664,15 +1738,21 @@ float Context::textWithFont(float x, float y, const text::TtfFont& font, float f
 					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
 					m_textVertices.clear();
 				}
+				if (m_renderer) {
+					m_renderer->flush();
+				}
 				if (m_atlas->width() < 2048 || m_atlas->height() < 2048) {
 					if (m_fontTextureId != 0 && m_renderer) {
 						m_renderer->deleteTexture(m_fontTextureId);
+						m_fontTextureId = 0;
 					}
 					m_atlas->resize(2048, 2048);
+					m_glyphCache.clear();
 					m_fontTextureId = m_renderer->createTexture(TextureType::Alpha, m_atlas->width(), m_atlas->height(), 0, m_atlas->data());
 					inserted = m_atlas->insert(key, cg);
 				} else {
 					m_atlas->reset();
+					m_glyphCache.clear();
 					inserted = m_atlas->insert(key, cg);
 				}
 			}
@@ -1798,17 +1878,22 @@ void Context::drawTextBuffer(const text::Buffer& buffer, text::FontSystem& fontS
 
 				auto inserted = m_atlas->insert(key, cg);
 				if (!inserted) {
+					flushBatch();
+					if (m_renderer) {
+						m_renderer->flush();
+					}
 					if (m_atlas->width() < 2048 || m_atlas->height() < 2048) {
-						flushBatch();
 						if (m_fontTextureId != 0 && m_renderer) {
 							m_renderer->deleteTexture(m_fontTextureId);
+							m_fontTextureId = 0;
 						}
 						m_atlas->resize(2048, 2048);
+						m_glyphCache.clear();
 						m_fontTextureId = m_renderer->createTexture(TextureType::Alpha, 2048, 2048, 0, m_atlas->data());
 						inserted = m_atlas->insert(key, cg);
 					} else {
-						flushBatch();
 						m_atlas->reset();
+						m_glyphCache.clear();
 						inserted = m_atlas->insert(key, cg);
 					}
 				}

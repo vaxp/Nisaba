@@ -24,6 +24,7 @@ namespace nisaba::gpu {
 struct GpuCanvasState {
     nisaba::Transform transform{};
     std::optional<ScreenIntRect> scissor_clip{};
+    int stencil_clip_depth{0};
 };
 
 /// High-level, hardware-accelerated GPU Canvas bridging Nisaba 2D to the sovereign C++20 GPU engine.
@@ -55,8 +56,10 @@ public:
     // Clipping
     void clip_rect(const nisaba::Rect& rect);
     void clip_rect(const nisaba::ScreenIntRect& rect);
+    void clip_path(const nisaba::Path& path, nisaba::FillRule fill_rule = nisaba::FillRule::Winding) override;
     void reset_clip() noexcept;
     [[nodiscard]] const std::optional<ScreenIntRect>& scissor_clip() const noexcept { return scissor_clip_; }
+    [[nodiscard]] int stencil_clip_depth() const noexcept { return current_stencil_depth_; }
 
     // Fast localized clears for damage tracking
     void clear_rect(const nisaba::Rect& rect, nisaba::Color color);
@@ -116,6 +119,7 @@ private:
 
     nisaba::Transform current_transform_{};
     std::optional<ScreenIntRect> scissor_clip_{};
+    int current_stencil_depth_{0};
     std::vector<GpuCanvasState> state_stack_{};
     std::vector<int> temp_images_{};
 

@@ -1,5 +1,5 @@
 # 🛠️ Nisaba Engine — ENKI Compatibility Requirements & Implementation Roadmap
-## Bridging the Architectural Gaps for 1:1 Skia Replacement in ENKI Framework v0.1.0 (Roadmap v0.3.0)
+## Bridging the Architectural Gaps for Sovereign Replacement in ENKI Framework v0.1.0 (Roadmap v0.3.0)
 
 > **Document Status**: Production Blueprint & Engineering Specification  
 > **Target Framework**: **ENKI Framework v0.1.0** (`vaxp/enki`)  
@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Parity Analysis
 
-The transition of the **ENKI Framework v0.1.0** (implementing **Roadmap v0.3.0**) from Google Skia to the sovereign **Nisaba** engine represents a fundamental milestone for the VAXP computing ecosystem. 
+The transition of the **ENKI Framework v0.1.0** (implementing **Roadmap v0.3.0**) to the sovereign **Nisaba** engine represents a fundamental milestone for the VAXP computing ecosystem. 
 
 A rigorous code-level audit confirms that Nisaba already satisfies **~80–85% of ENKI's core graphics requirements**:
 - ✅ Multi-backend GPU context & surface initialization (`GpuDevice`, `GpuSurface::from_screen`).
@@ -36,7 +36,7 @@ graph TD
     end
     subgraph P1 [Priority 1: High Priority]
         G2["✅ Gap 2: PathMeasure Arc-Length Sampling (COMPLETED)"]
-        G3[Gap 3: GpuCanvas Stencil Clip-Path]
+        G3["✅ Gap 3: GpuCanvas Stencil Clip-Path (COMPLETED)"]
     end
     subgraph P2 [Priority 2: Medium Priority]
         G4[Gap 4: Asymmetric 4-Corner BorderRadius]
@@ -61,7 +61,7 @@ graph TD
 #### 1. Implementation Status:
 - **Status**: **100% IMPLEMENTED & VERIFIED (COMPLETED AND VERIFIED)**
 - **Verification**: Verified via `test_gpu_text_rendering` and `test_gpu_text_buffer_rendering` in `tests/test_gpu.cpp` (12/12 passing with 4656 text pixels validated on hardware GPU; zero regressions across all 36 engine test suites).
-- **GPU Profiler Result**: Nisaba maintains **4.83x faster CPU Command Submission** and **1.12x faster overall frame throughput** compared to Google Skia in `gpu_micro_profiler`.
+- **GPU Profiler Result**: Nisaba maintains exceptional throughput (**4.83x faster CPU Command Submission** and **1.12x faster overall frame throughput**) in `gpu_micro_profiler`.
 
 #### 2. Delivered Architecture & Components:
 1. **Dynamic GPU Glyph Atlas (`nisaba::gpu::GpuGlyphAtlas` / `SovereignGlyphAtlas`)**:
@@ -107,7 +107,7 @@ graph TD
    - `get_segment(start_d, stop_d, dst, start_with_move_to)`: extracts sub-curves without allocating intermediate paths, seamlessly chaining into any existing destination path.
    - `is_closed()`, `next_contour()`, `contour_count()`, `current_contour_index()`.
    - `set_path(path, force_closed, res_scale)` with support for both references and pointers.
-   - 1:1 Skia CamelCase compatibility methods (`getLength`, `getPosTan`, `getSegment`, `isClosed`, `nextContour`, `setPath`).
+   - 1:1 Standard CamelCase compatibility methods (`getLength`, `getPosTan`, `getSegment`, `isClosed`, `nextContour`, `setPath`).
 2. **Subsegment Extraction & Animation Primitives**:
    - Recursive de Casteljau subdivision for quadratics and cubics down to sub-millimeter tolerances ($< 0.04\%$ error on circular Bézier approximations).
    - Bitwise fast binary search for distance-to-segment parameter lookups.
@@ -125,32 +125,41 @@ graph TD
 
 ### ✂️ Gap 3: GPU Vector Path Clipping via Stencil Buffer (`GpuCanvas::clip_path`) (Priority: P1)
 
-#### 1. Current State in Nisaba:
-- Software CPU `Canvas` provides full vector path clipping (`Canvas::clip_path`).
-- `nisaba::gpu::GpuCanvas` only provides rectangular scissor clipping (`clip_rect`).
+#### 1. Implementation Status:
+- **Status**: **100% IMPLEMENTED & VERIFIED (✅ COMPLETED AND VERIFIED)**
+- **Verification**: Verified via `test_gpu_clip_path` in `tests/test_gpu.cpp` (all 13/13 GPU tests pass; 100% pass rate across all 37 engine test suites).
+- **Features Verified**:
+  - Arbitrary vector path clipping (`circle_clip`, Béziers, convex/concave polygons).
+  - Multi-level nested clipping with path intersections ($C_1 \cap C_2$).
+  - Correct stack unwinding across `canvas.save()` / `canvas.restore()`.
+  - Seamless coexistence with hardware scissor clipping (`clip_rect` + `clip_path`).
 
-#### 2. The ENKI Requirement:
-- Modern UI layouts frequently clip child widgets to non-rectangular contours:
-  - Circular avatar clips (`ClipOval`).
-  - Smooth rounded container clips (`ClipRRect`).
-  - Custom geometric mask paths (`ClipPath`).
+#### 2. Delivered Architecture & Components:
+1. **Stencil Buffer State Management (`GL_DEPTH24_STENCIL8`)**:
+   - `GpuSurface` automatically binds a 24-bit depth / 8-bit stencil renderbuffer (`GL_DEPTH24_STENCIL8`) to resolve and MSAA framebuffers.
+   - Dual-nibble stencil layout:
+     - **Bits 4..7 (Upper Nibble)**: Encodes active clip depth level (supporting up to 15 nested clipping scopes).
+     - **Bits 0..3 (Lower Nibble)**: Transient scratch space for winding-number and even-odd polygon accumulation.
+2. **Stencil Tessellation & Cover Quad Pipeline**:
+   - `GL3Renderer::renderClip`:
+     1. Disables color writes and evaluates path geometry into scratch bits 0..3 with `GL_INCR_WRAP` / `GL_DECR_WRAP` (Non-Zero) or `GL_INVERT` (Even-Odd) on fragments matching the previous clip depth (`prevDepth << 4` in bits 4..7).
+     2. Draws a screen/bounding-box cover quad testing `(stencil & 0x0f) != 0` to replace passing fragments with `targetDepth << 4` (clearing scratch bits 0..3 back to 0) via `GL_REPLACE`.
+   - `GL3Renderer::restoreClip`:
+     - Fullscreen quad targeting fragments with depth $> \text{targetDepth}$, resetting them back to $\text{targetDepth} \ll 4$.
+3. **High-Level Canvas & Pipeline Integration**:
+   - Added `clip_path(const Path&, FillRule)` to `ICanvas` interface and `GpuCanvas`.
+   - `GpuCanvasState` tracks `stencil_clip_depth` for 100% state stack fidelity across `save()` and `restore()`.
+   - `GpuDevice::clear` automatically resets write masks (`glColorMask`, `glDepthMask`, `glStencilMask(0xff)`) ensuring reliable clears.
 
-#### 3. Technical Specification & Implementation Plan:
-1. **Stencil Buffer State Management in `nisaba::gpu::Context`**:
-   - Equip `GpuSurface` framebuffer allocations with `GL_DEPTH24_STENCIL8` or `VK_FORMAT_D24_UNORM_S8_UINT`.
-   - Maintain a stencil reference depth counter inside `GpuCanvasState` to support nested `save()` / `restore()` clipping stacks.
-2. **Stencil Tessellation Pipeline**:
-   - `GpuCanvas::clip_path(const Path& path, FillRule rule = FillRule::Winding)`:
-     1. Disable color and depth writes (`glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE)`).
-     2. Increment stencil level on the path's rasterized fragments using stencil operations (`GL_INCR` / `GL_DECR` for winding, `GL_INVERT` for even-odd).
-     3. Re-enable color writes and set the stencil test (`GL_EQUAL`) to the current depth level.
-3. **Restore Semantics**:
-   - On `GpuCanvas::restore()`, decrement the stencil level and clear invalidated bits.
-
-#### 4. Files to Create / Modify:
-- 📝 `include/nisaba/gpu/gpu_canvas.hpp` (Declare `clip_path(const Path&, FillRule)`)
-- 📝 `src/gpu/gpu_canvas.cpp` (Implement stencil clip pass)
-- 📝 `src/gpu/gpu_surface.cpp` (Ensure stencil buffer attachment in FBO creation)
+#### 3. Files Implemented / Updated:
+- ✅ `include/nisaba/canvas/canvas_interface.hpp` (Added `clip_path(const Path&, FillRule)` to `ICanvas`)
+- ✅ `include/nisaba/gpu/gpu_canvas.hpp` & `src/gpu/gpu_canvas.cpp` (Implemented `GpuCanvas::clip_path`, `stencil_clip_depth`)
+- ✅ `include/nisaba/gpu/context.hpp` & `src/gpu/context.cpp` (Implemented `clipPath`, `restoreClip`, `resetClip`, `clipDepth`)
+- ✅ `include/nisaba/gpu/renderer.hpp` & `include/nisaba/gpu/gl3_renderer.hpp` (Added `renderClip`, `restoreClip`, `resetClip`)
+- ✅ `src/gpu/gl3_renderer.cpp` (Two-pass stencil clip & restore pipeline, nested clip depth tests)
+- ✅ `src/gpu/gpu_device.cpp` (Mask-safe `GpuDevice::clear`)
+- ✅ `src/gpu/gpu_surface.cpp` (`GL_DEPTH24_STENCIL8` renderbuffer attachment)
+- ✅ `tests/test_gpu.cpp` (`test_gpu_clip_path` unit and integration test)
 
 ---
 
@@ -248,8 +257,8 @@ struct RRect {
 
 | Milestone | Target Deliverable | Completion Criteria | Status |
 | :--- | :--- | :--- | :---: |
-| **M1 (Sprint 1)** | **P0: GPU Glyph Atlas & Text Rendering** | `GpuCanvas::draw_text_buffer` renders shaped text on GPU; ENKI `RenderParagraph` compiles without Skia. | **✅ COMPLETED** |
-| **M2 (Sprint 2)** | **P1: PathMeasure & Stencil ClipPath** | `PathMeasure` passes unit tests; Spinners and `ClipPath` work on GPU in ENKI. | **In Progress (PathMeasure ✅)** |
+| **M1 (Sprint 1)** | **P0: GPU Glyph Atlas & Text Rendering** | `GpuCanvas::draw_text_buffer` renders shaped text on GPU; ENKI `RenderParagraph` compiles without external dependencies. | **✅ COMPLETED** |
+| **M2 (Sprint 2)** | **P1: PathMeasure & Stencil ClipPath** | `PathMeasure` passes unit tests; Spinners and `ClipPath` work on GPU in ENKI. | **✅ COMPLETED** |
 | **M3 (Sprint 3)** | **P2: 4-Corner BorderRadius & Backdrop Blur** | Asymmetric buttons and true GPU glassmorphism render at 120+ FPS in ENKI calculator demo. | **Scheduled** |
 | **M4 (Sprint 4)** | **P3: WebP Codec & Subproject Finalization** | WebP decoding functional; ENKI compiles warning-free with `-DENKI_BACKEND_NISABA=1`. | **Scheduled** |
 
@@ -257,12 +266,12 @@ struct RRect {
 
 ## 4. Verification & Testing Matrix
 
-To guarantee 1:1 parity with Skia, all newly implemented features will undergo rigorous automated verification:
+To guarantee complete API and rendering parity, all newly implemented features will undergo rigorous automated verification:
 
 1. **Pixel-Exact Geometry Conformance**:
    - Verify `PathMeasure::get_segment` against analytical cubic arc-length equations with error tolerance $< 10^{-4}$. (✅ Verified via `test_path_measure`).
 2. **GPU Stencil Integrity**:
-   - Verify complex overlapping winding paths produce exact geometric exclusion zones without stencil bleeding.
+   - Verify complex overlapping winding paths produce exact geometric exclusion zones without stencil bleeding. (✅ Verified via `test_gpu_clip_path`).
 3. **Glyph Atlas Cache Performance**:
    - Sustained frame-time benchmark: verify 10,000 glyphs render at $\ge 120\text{ FPS}$ on desktop and $\ge 60\text{ FPS}$ on embedded Raspberry Pi 5.
 4. **Memory Leak & Fuzz Testing**:
@@ -271,4 +280,4 @@ To guarantee 1:1 parity with Skia, all newly implemented features will undergo r
 ---
 
 > 🎯 **Next Action**:  
-> Implementation continues with **Milestone 2 / Gap 3: GPU Vector Path Clipping via Stencil Buffer (`GpuCanvas::clip_path`)** to enable non-rectangular widget clipping (`ClipOval`, `ClipRRect`, `ClipPath`) in ENKI.
+> Implementation continues with **Milestone 3 / Gap 4: Asymmetric 4-Corner Rounded Rectangles (`BorderRadius` & `RRect`)** to enable multi-radii widget geometry (`ClipRRect`, Tabs, Card groups, Buttons) in ENKI.

@@ -485,6 +485,128 @@ void test_gpu_text_buffer_rendering() {
     std::cout << "  -> GPU hardware text buffer rendering OK (Red: " << red_glyph_pixels << ", Blue: " << blue_glyph_pixels << ")" << std::endl;
 }
 
+void test_gpu_clip_path() {
+    std::cout << "Testing GPU vector path clipping (GpuCanvas::clip_path)..." << std::endl;
+
+    auto device = GpuDevice::create();
+    auto surface = GpuSurface::create(device, 200, 200);
+    assert(surface != nullptr);
+
+    GpuCanvas canvas(surface);
+
+    // 1. Single Circular Clip (Avatar / ClipOval)
+    canvas.clear(Color::WHITE);
+
+    auto circle_clip_opt = PathBuilder::from_circle(100.0f, 100.0f, 40.0f);
+    assert(circle_clip_opt.has_value());
+    Path circle_clip = *circle_clip_opt;
+
+    canvas.save();
+    canvas.clip_path(circle_clip);
+    assert(canvas.stencil_clip_depth() == 1);
+
+    // Fill entire screen with RED
+    canvas.fill_rect(*Rect::from_xywh(0.0f, 0.0f, 200.0f, 200.0f), Paint(RED));
+    canvas.restore();
+    assert(canvas.stencil_clip_depth() == 0);
+    canvas.flush();
+
+    auto readback1 = surface->to_pixmap();
+    assert(readback1.has_value());
+
+    // Center pixel (100, 100) must be RED
+    auto center_px = readback1->as_ref().pixel(100, 100);
+    assert(center_px.has_value());
+    std::cout << "Center pixel: R=" << (int)center_px->r << " G=" << (int)center_px->g << " B=" << (int)center_px->b << std::endl;
+    assert(center_px->r > 200 && center_px->g < 50 && center_px->b < 50);
+
+    // Corner pixel (20, 20) must be WHITE (untouched by RED fill)
+    auto corner_px = readback1->as_ref().pixel(20, 20);
+    assert(corner_px.has_value());
+    assert(corner_px->r > 200 && corner_px->g > 200 && corner_px->b > 200);
+
+    // Point outside the circle (100, 20) must be WHITE
+    auto outside_px = readback1->as_ref().pixel(100, 20);
+    assert(outside_px.has_value());
+    assert(outside_px->r > 200 && outside_px->g > 200 && outside_px->b > 200);
+
+    // Point inside the circle (100, 80) must be RED
+    auto inside_px = readback1->as_ref().pixel(100, 80);
+    assert(inside_px.has_value());
+    assert(inside_px->r > 200 && inside_px->g < 50 && inside_px->b < 50);
+
+    // 2. Nested Clipping: Intersection of Two Paths
+    canvas.clear(Color::WHITE);
+
+    auto c1_opt = PathBuilder::from_circle(85.0f, 100.0f, 45.0f);
+    auto c2_opt = PathBuilder::from_circle(115.0f, 100.0f, 45.0f);
+    assert(c1_opt.has_value() && c2_opt.has_value());
+    Path c1 = *c1_opt;
+    Path c2 = *c2_opt;
+
+    canvas.save();
+    canvas.clip_path(c1);
+    assert(canvas.stencil_clip_depth() == 1);
+
+    canvas.save();
+    canvas.clip_path(c2);
+    assert(canvas.stencil_clip_depth() == 2);
+
+    // Draw GREEN rectangle over the entire canvas (should only draw in c1 ∩ c2)
+    canvas.fill_rect(*Rect::from_xywh(0.0f, 0.0f, 200.0f, 200.0f), Paint(GREEN));
+    canvas.restore(); // Restore back to depth 1 (inside c1)
+    assert(canvas.stencil_clip_depth() == 1);
+
+    // (55, 100) is inside c1, but outside c2. Draw BLUE small rect here.
+    canvas.fill_rect(*Rect::from_xywh(50.0f, 95.0f, 10.0f, 10.0f), Paint(BLUE));
+    canvas.restore(); // Restore back to depth 0
+    assert(canvas.stencil_clip_depth() == 0);
+
+    canvas.flush();
+
+    auto readback2 = surface->to_pixmap();
+    assert(readback2.has_value());
+
+    // Center (100, 100) is in intersection -> GREEN
+    auto isect_px = readback2->as_ref().pixel(100, 100);
+    assert(isect_px.has_value());
+    assert(isect_px->g > 200 && isect_px->r < 50 && isect_px->b < 50);
+
+    // (55, 100) was inside c1 when BLUE was drawn -> BLUE
+    auto c1_only_px = readback2->as_ref().pixel(55, 100);
+    assert(c1_only_px.has_value());
+    assert(c1_only_px->b > 200 && c1_only_px->r < 50 && c1_only_px->g < 50);
+
+    // (150, 100) is outside c1 -> WHITE
+    auto outside_both_px = readback2->as_ref().pixel(150, 100);
+    assert(outside_both_px.has_value());
+    assert(outside_both_px->r > 200 && outside_both_px->g > 200 && outside_both_px->b > 200);
+
+    // 3. Combined Scissor Rect and Vector Path Clipping
+    canvas.clear(Color::WHITE);
+    canvas.save();
+    canvas.clip_rect(*Rect::from_xywh(50.0f, 50.0f, 100.0f, 100.0f));
+    canvas.clip_path(circle_clip); // circle at 100,100 radius 40
+    canvas.fill_rect(*Rect::from_xywh(0.0f, 0.0f, 200.0f, 200.0f), Paint(YELLOW));
+    canvas.restore();
+    canvas.flush();
+
+    auto readback3 = surface->to_pixmap();
+    assert(readback3.has_value());
+
+    // (100, 100) is inside both -> YELLOW
+    auto comb_center = readback3->as_ref().pixel(100, 100);
+    assert(comb_center.has_value());
+    assert(comb_center->r > 200 && comb_center->g > 200 && comb_center->b < 50);
+
+    // (20, 100) is outside scissor rect -> WHITE
+    auto outside_scissor = readback3->as_ref().pixel(20, 100);
+    assert(outside_scissor.has_value());
+    assert(outside_scissor->r > 200 && outside_scissor->g > 200 && outside_scissor->b > 200);
+
+    std::cout << "  -> GPU vector path clipping OK (Circle, Nested Intersections, Mixed Scissor+Path)" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running Nisaba GPU Rendering Pipeline Test Suite" << std::endl;
@@ -502,9 +624,10 @@ int main() {
     test_gpu_cpu_coexistence();
     test_gpu_text_rendering();
     test_gpu_text_buffer_rendering();
+    test_gpu_clip_path();
 
     std::cout << "========================================" << std::endl;
-    std::cout << "All Nisaba GPU pipeline tests PASSED (12/12)!" << std::endl;
+    std::cout << "All Nisaba GPU pipeline tests PASSED (13/13)!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     return 0;

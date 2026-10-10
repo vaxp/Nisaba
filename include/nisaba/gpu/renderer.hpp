@@ -84,6 +84,18 @@ public:
 	virtual void renderTriangles(const Paint& paint, const CompositeOperationState& compOp,
 	                            const Scissor& scissor, const Vertex* verts, int nverts,
 	                            float fringe, int shaderType = 3) = 0;
+
+	virtual void renderClip(const RenderPath* paths, int npaths, Winding winding, int targetDepth,
+	                       const Scissor& scissor, const float* bounds) {
+		(void)paths; (void)npaths; (void)winding; (void)targetDepth; (void)scissor; (void)bounds;
+	}
+
+	virtual void restoreClip(int targetDepth) {
+		(void)targetDepth;
+	}
+
+	virtual void resetClip() {
+	}
 };
 
 } // namespace nisaba::gpu

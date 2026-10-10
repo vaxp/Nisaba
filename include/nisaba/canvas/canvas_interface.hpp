@@ -26,6 +26,9 @@ public:
     virtual void fill_rect(const Rect& rect, const Paint& paint) = 0;
     virtual void fill_path(const Path& path, const Paint& paint, FillRule fill_rule = FillRule::Winding) = 0;
     virtual void stroke_path(const Path& path, const Paint& paint, const Stroke& stroke) = 0;
+    virtual void clip_path(const Path& path, FillRule fill_rule = FillRule::Winding) {
+        (void)path; (void)fill_rule;
+    }
 };
 
 } // namespace nisaba

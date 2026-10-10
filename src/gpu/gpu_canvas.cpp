@@ -44,6 +44,7 @@ void GpuCanvas::clear(nisaba::Color color) {
         }
         temp_images_.clear();
     }
+    current_stencil_depth_ = 0;
     if (surface_) {
         surface_->bind();
         surface_->clear(color);
@@ -55,7 +56,8 @@ void GpuCanvas::save() {
     if (context_) context_->save();
     state_stack_.push_back(GpuCanvasState{
         .transform = current_transform_,
-        .scissor_clip = scissor_clip_
+        .scissor_clip = scissor_clip_,
+        .stencil_clip_depth = current_stencil_depth_
     });
 }
 
@@ -64,6 +66,7 @@ void GpuCanvas::restore() {
     if (!state_stack_.empty()) {
         current_transform_ = state_stack_.back().transform;
         scissor_clip_ = state_stack_.back().scissor_clip;
+        current_stencil_depth_ = state_stack_.back().stencil_clip_depth;
         state_stack_.pop_back();
     }
 }
@@ -158,8 +161,19 @@ void GpuCanvas::clear_rect(const nisaba::ScreenIntRect& rect, nisaba::Color colo
     restore();
 }
 
+void GpuCanvas::clip_path(const nisaba::Path& path, nisaba::FillRule fill_rule) {
+    if (!context_) return;
+    ensure_frame();
+    current_stencil_depth_++;
+    context_->clipPath(path, fill_rule == FillRule::EvenOdd ? Winding::Clockwise : Winding::CounterClockwise);
+}
+
 void GpuCanvas::reset_clip() noexcept {
-    if (context_) context_->resetScissor();
+    if (context_) {
+        context_->resetScissor();
+        context_->resetClip();
+    }
+    current_stencil_depth_ = 0;
     if (surface_) {
         scissor_clip_ = ScreenIntRect::from_xywh(0, 0, surface_->width(), surface_->height());
     } else {

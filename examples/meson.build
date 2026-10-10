@@ -64,6 +64,12 @@ if get_option('enable_gpu')
       dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
     )
 
+    showcase_enki_stages_exe = executable('showcase_enki_stages',
+      'showcase_enki_stages.cpp',
+      cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
+      dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
+    )
+
     example_damage_comparison_exe = executable('example_damage_comparison',
       'example_damage_comparison.cpp',
       cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],

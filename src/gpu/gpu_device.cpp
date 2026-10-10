@@ -270,7 +270,11 @@ void GpuDevice::set_blend_mode(BlendMode blend_mode) {
 }
 
 void GpuDevice::clear(nisaba::Color color) {
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glStencilMask(0xffffffff);
     glClearColor(color.red(), color.green(), color.blue(), color.alpha());
+    glClearStencil(0);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
