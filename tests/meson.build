@@ -269,4 +269,11 @@ if get_option('enable_pdf')
   test('pdf_test', test_pdf_exe)
 endif
 
+# RRect & BorderRadius 4-corner asymmetric geometry unit tests
+test_rrect_exe = executable('test_rrect',
+  'test_rrect.cpp',
+  dependencies : nisaba_dep
+)
+test('rrect_test', test_rrect_exe)
+
 

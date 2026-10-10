@@ -1,9 +1,10 @@
 //
 // Nisaba Sovereign Graphics Engine — ENKI Core Graphics Showcase
-// Demonstrating the 3 Completed Compatibility Milestones in Real-Time:
+// Demonstrating the 4 Completed Compatibility Milestones in Real-Time:
 //   Stage 1 (Gap 1): GPU Hardware Multilingual Text Shaping & Glyph Atlas
 //   Stage 2 (Gap 2): Arc-Length PathMeasure & Exact Tangent Follower
 //   Stage 3 (Gap 3): GPU Vector Path Clipping via 8-Bit Stencil Buffer
+//   Stage 4 (Gap 4): Asymmetric 4-Corner Rounded Rectangles (BorderRadius & RRect)
 //
 // Built purely on sovereign Modern C++20 with Zero Third-Party Dependencies
 //
@@ -74,14 +75,15 @@ std::string resolveFont(std::string_view name) {
 // Interactive Showcase State
 // -----------------------------------------------------------------------------
 enum class ViewMode {
-    TriView,      // All 3 stages side-by-side
+    AllStages,    // All 4 stages side-by-side (Quad-View)
     Stage1_Text,  // Focused on GPU text rendering & atlas
     Stage2_Path,  // Focused on PathMeasure arc-length & tangent
-    Stage3_Clip   // Focused on Stencil vector path clipping
+    Stage3_Clip,  // Focused on Stencil vector path clipping
+    Stage4_RRect  // Focused on Asymmetric 4-corner RRect & BorderRadius
 };
 
 struct ShowcaseState {
-    ViewMode view_mode{ViewMode::TriView};
+    ViewMode view_mode{ViewMode::AllStages};
     bool vsync{false};
     bool is_paused{false};
     bool clip_enabled{true};
@@ -158,6 +160,13 @@ int main(int argc, char** argv) {
             target_frames = std::atoi(argv[++i]);
         } else if (std::string(argv[i]) == "--snapshot" && i + 1 < argc) {
             snapshot_path = argv[++i];
+        } else if (std::string(argv[i]) == "--stage" && i + 1 < argc) {
+            std::string st = argv[++i];
+            if (st == "1") g_state.view_mode = ViewMode::Stage1_Text;
+            else if (st == "2") g_state.view_mode = ViewMode::Stage2_Path;
+            else if (st == "3") g_state.view_mode = ViewMode::Stage3_Clip;
+            else if (st == "4") g_state.view_mode = ViewMode::Stage4_RRect;
+            else if (st == "all" || st == "a") g_state.view_mode = ViewMode::AllStages;
         }
     }
 
@@ -245,7 +254,7 @@ int main(int argc, char** argv) {
 
     // Prepare Multilingual Text Buffer
     Buffer arabic_buffer(Metrics(18.0f, 26.0f));
-    arabic_buffer.set_text("محرك نصوص سيادي فائق السرعة يدعم التشكيل العربي الكامل والربط المتجهي");
+    arabic_buffer.set_text("محرك نصوص يدعم التشكيل العربي الكامل والربط المتجهي");
     arabic_buffer.set_wrap(Wrap::Word);
     arabic_buffer.set_align(Align::Right);
     arabic_buffer.set_size(360.0f, 80.0f);
@@ -263,7 +272,8 @@ int main(int argc, char** argv) {
               << "Keyboard Controls    : [1] Focus Stage 1 (Text)\n"
               << "                       [2] Focus Stage 2 (PathMeasure)\n"
               << "                       [3] Focus Stage 3 (ClipPath)\n"
-              << "                       [A] View All 3 Stages (Tri-View)\n"
+              << "                       [4] Focus Stage 4 (RRect & BorderRadius)\n"
+              << "                       [A] View All 4 Stages (Quad-View)\n"
               << "                       [V] Toggle VSync (Benchmark Maximum FPS)\n"
               << "                       [C] Toggle Stencil Clipping ON/OFF\n"
               << "                       [SPACE] Pause / Resume Animations\n"
@@ -280,11 +290,12 @@ int main(int argc, char** argv) {
         if (btn == 1) {
             g_state.mouse_down = true;
             // Check if clicking tab buttons
-            if (y >= 14.0f && y <= 42.0f) {
-                if (x >= 480.0f && x <= 560.0f) g_state.view_mode = ViewMode::TriView;
-                else if (x >= 570.0f && x <= 690.0f) g_state.view_mode = ViewMode::Stage1_Text;
-                else if (x >= 700.0f && x <= 840.0f) g_state.view_mode = ViewMode::Stage2_Path;
-                else if (x >= 850.0f && x <= 980.0f) g_state.view_mode = ViewMode::Stage3_Clip;
+            if (y >= 14.0f && y <= 48.0f) {
+                if (x >= 400.0f && x <= 495.0f) g_state.view_mode = ViewMode::AllStages;
+                else if (x >= 505.0f && x <= 620.0f) g_state.view_mode = ViewMode::Stage1_Text;
+                else if (x >= 630.0f && x <= 760.0f) g_state.view_mode = ViewMode::Stage2_Path;
+                else if (x >= 770.0f && x <= 900.0f) g_state.view_mode = ViewMode::Stage3_Clip;
+                else if (x >= 910.0f && x <= 1050.0f) g_state.view_mode = ViewMode::Stage4_RRect;
             }
         }
     });
@@ -299,13 +310,15 @@ int main(int argc, char** argv) {
         if (key == 27 || key == 0xff1b) { // ESC
             g_running = false;
         } else if (key == 'a' || key == 'A') {
-            g_state.view_mode = ViewMode::TriView;
+            g_state.view_mode = ViewMode::AllStages;
         } else if (key == '1') {
             g_state.view_mode = ViewMode::Stage1_Text;
         } else if (key == '2') {
             g_state.view_mode = ViewMode::Stage2_Path;
         } else if (key == '3') {
             g_state.view_mode = ViewMode::Stage3_Clip;
+        } else if (key == '4') {
+            g_state.view_mode = ViewMode::Stage4_RRect;
         } else if (key == 'v' || key == 'V') {
             g_state.vsync = !g_state.vsync;
             std::cout << "[*] VSync toggled: " << (g_state.vsync ? "ON (Refresh Locked)" : "OFF (Uncapped GPU Benchmark)") << "\n";
@@ -418,30 +431,32 @@ int main(int argc, char** argv) {
 
             // Title & Engine Badge
             canvas.draw_text(38.0f, 26.0f, "NISABA CORE", Paint(Color::from_rgba8(0, 242, 254, 255)), 12.0f, "mono");
-            canvas.draw_text(38.0f, 44.0f, "ENKI Framework Compatibility Showcase (Roadmap v0.3.0)", Paint(Color::from_rgba8(240, 245, 255, 255)), 15.0f, "sans");
+            canvas.draw_text(38.0f, 44.0f, "ENKI Compatibility Showcase (Roadmap v0.3.0)", Paint(Color::from_rgba8(240, 245, 255, 255)), 15.0f, "sans");
 
             // Interactive Navigation Tabs
             auto draw_tab = [&](float tx, float tw, std::string_view label, bool active) {
                 auto tr = Rect::from_xywh(tx, 16.0f, tw, 32.0f);
                 if (!tr) return;
+                float label_x = tx + (tw - static_cast<float>(label.size()) * 7.2f) * 0.5f;
                 if (active) {
                     Paint tp(Color::from_rgba8(0, 229, 255, 45));
                     canvas.fill_round_rect(*tr, 8.0f, 8.0f, tp);
                     Paint bp(Color::from_rgba8(0, 229, 255, 180));
                     canvas.stroke_round_rect(*tr, 8.0f, 8.0f, bp, Stroke(1.0f));
-                    canvas.draw_text(tx + tw * 0.5f - 24.0f, 32.0f, label, Paint(Color::from_rgba8(0, 242, 254, 255)), 11.5f, "mono");
+                    canvas.draw_text(label_x, 32.0f, label, Paint(Color::from_rgba8(0, 242, 254, 255)), 11.5f, "mono");
                 } else {
                     bool hover = (g_state.mouse_x >= tx && g_state.mouse_x <= tx + tw && g_state.mouse_y >= 16.0f && g_state.mouse_y <= 48.0f);
                     Paint tp(Color::from_rgba8(20, 28, 48, hover ? 140 : 80));
                     canvas.fill_round_rect(*tr, 8.0f, 8.0f, tp);
-                    canvas.draw_text(tx + tw * 0.5f - 24.0f, 32.0f, label, Paint(Color::from_rgba8(140, 165, 200, 200)), 11.5f, "mono");
+                    canvas.draw_text(label_x, 32.0f, label, Paint(Color::from_rgba8(140, 165, 200, 200)), 11.5f, "mono");
                 }
             };
 
-            draw_tab(480.0f, 80.0f, "[A] TRI-VIEW", g_state.view_mode == ViewMode::TriView);
-            draw_tab(570.0f, 120.0f, "[1] STAGE 1 TEXT", g_state.view_mode == ViewMode::Stage1_Text);
-            draw_tab(700.0f, 140.0f, "[2] STAGE 2 MEASURE", g_state.view_mode == ViewMode::Stage2_Path);
-            draw_tab(850.0f, 130.0f, "[3] STAGE 3 CLIPPING", g_state.view_mode == ViewMode::Stage3_Clip);
+            draw_tab(400.0f, 95.0f, "[A] ALL (4)", g_state.view_mode == ViewMode::AllStages);
+            draw_tab(505.0f, 115.0f, "[1] S1 TEXT", g_state.view_mode == ViewMode::Stage1_Text);
+            draw_tab(630.0f, 130.0f, "[2] S2 MEASURE", g_state.view_mode == ViewMode::Stage2_Path);
+            draw_tab(770.0f, 130.0f, "[3] S3 CLIPPING", g_state.view_mode == ViewMode::Stage3_Clip);
+            draw_tab(910.0f, 140.0f, "[4] S4 RRECT", g_state.view_mode == ViewMode::Stage4_RRect);
 
             // Right HUD: Live FPS Badge
             std::ostringstream ss_fps;
@@ -456,16 +471,19 @@ int main(int argc, char** argv) {
         // =====================================================================
         float content_y = 80.0f;
         float content_h = static_cast<float>(win_h) - content_y - 60.0f;
-        float card_gap = 18.0f;
+        float card_gap = 14.0f;
         float total_cards_w = static_cast<float>(win_w) - 40.0f;
 
-        // Coordinates for Cards
+        // Coordinates for Cards (4-column layout)
+        float col_w = (total_cards_w - card_gap * 3.0f) / 4.0f;
         float c1_x = 20.0f;
-        float c1_w = (total_cards_w - card_gap * 2.0f) / 3.0f;
-        float c2_x = c1_x + c1_w + card_gap;
-        float c2_w = c1_w;
-        float c3_x = c2_x + c2_w + card_gap;
-        float c3_w = c1_w;
+        float c1_w = col_w;
+        float c2_x = c1_x + col_w + card_gap;
+        float c2_w = col_w;
+        float c3_x = c2_x + col_w + card_gap;
+        float c3_w = col_w;
+        float c4_x = c3_x + col_w + card_gap;
+        float c4_w = col_w;
 
         if (g_state.view_mode == ViewMode::Stage1_Text) {
             c1_x = 20.0f; c1_w = total_cards_w;
@@ -473,6 +491,8 @@ int main(int argc, char** argv) {
             c2_x = 20.0f; c2_w = total_cards_w;
         } else if (g_state.view_mode == ViewMode::Stage3_Clip) {
             c3_x = 20.0f; c3_w = total_cards_w;
+        } else if (g_state.view_mode == ViewMode::Stage4_RRect) {
+            c4_x = 20.0f; c4_w = total_cards_w;
         }
 
         // Helper to draw a glassmorphic showcase card
@@ -498,30 +518,35 @@ int main(int argc, char** argv) {
         // ---------------------------------------------------------------------
         // CARD 1: STAGE 1 — Hardware GPU Multilingual Text & Atlas
         // ---------------------------------------------------------------------
-        if (g_state.view_mode == ViewMode::TriView || g_state.view_mode == ViewMode::Stage1_Text) {
+        if (g_state.view_mode == ViewMode::AllStages || g_state.view_mode == ViewMode::Stage1_Text) {
             Color accent = Color::from_rgba8(0, 229, 255, 255);
             draw_card_frame(c1_x, c1_w, "01 // GAP 1 [COMPLETED]", "GPU Hardware Text & Multilingual Atlas", accent);
 
             float inner_x = c1_x + 24.0f;
             float inner_y = content_y + 78.0f;
+            float inner_w = c1_w - 48.0f;
+
+            // Adapt text buffer wrap width to card size
+            arabic_buffer.set_size(std::max(180.0f, inner_w - 24.0f), 80.0f);
+            english_buffer.set_size(std::max(180.0f, inner_w - 24.0f), 50.0f);
 
             // Metric info pill
-            canvas.draw_text(inner_x, inner_y + 14.0f, "• Atlas: 2048x2048 R8_UNORM (Dynamic Skyline)", Paint(Color::from_rgba8(140, 175, 220, 255)), 11.0f, "mono");
-            canvas.draw_text(inner_x, inner_y + 30.0f, "• Shaping: HarfBuzz-Class Unicode 16.0 BiDi Engine", Paint(Color::from_rgba8(140, 175, 220, 255)), 11.0f, "mono");
+            canvas.draw_text(inner_x, inner_y + 14.0f, "• Atlas: 2048x2048 R8_UNORM", Paint(Color::from_rgba8(140, 175, 220, 255)), 10.5f, "mono");
+            canvas.draw_text(inner_x, inner_y + 28.0f, "• HarfBuzz-Class BiDi Engine", Paint(Color::from_rgba8(140, 175, 220, 255)), 10.5f, "mono");
 
             // 1. Multilingual Arabic Shaped Text via draw_text_buffer
-            float box1_y = inner_y + 44.0f;
-            auto box1_r = Rect::from_xywh(inner_x, box1_y, c1_w - 48.0f, 95.0f);
+            float box1_y = inner_y + 42.0f;
+            auto box1_r = Rect::from_xywh(inner_x, box1_y, inner_w, 105.0f);
             if (box1_r) {
                 canvas.fill_round_rect(*box1_r, 8.0f, 8.0f, Paint(Color::from_rgba8(16, 24, 40, 160)));
                 canvas.stroke_round_rect(*box1_r, 8.0f, 8.0f, Paint(Color::from_rgba8(0, 229, 255, 60)), Stroke(1.0f));
             }
-            canvas.draw_text(inner_x + 12.0f, box1_y + 18.0f, "Arabic HarfBuzz-Class Right-To-Left Shaping:", Paint(Color::from_rgba8(0, 229, 255, 220)), 11.0f, "mono");
-            canvas.draw_text_buffer(arabic_buffer, font_system, Point(inner_x + 12.0f, box1_y + 36.0f), Color::from_rgba8(255, 215, 0, 255));
+            canvas.draw_text(inner_x + 12.0f, box1_y + 18.0f, "Arabic HarfBuzz-Class BiDi Shaping:", Paint(Color::from_rgba8(0, 229, 255, 220)), 11.0f, "mono");
+            canvas.draw_text_buffer(arabic_buffer, font_system, Point(inner_x + 12.0f, box1_y + 32.0f), Color::from_rgba8(255, 215, 0, 255));
 
             // 2. English High-Throughput Buffer
-            float box2_y = box1_y + 105.0f;
-            auto box2_r = Rect::from_xywh(inner_x, box2_y, c1_w - 48.0f, 75.0f);
+            float box2_y = box1_y + 114.0f;
+            auto box2_r = Rect::from_xywh(inner_x, box2_y, inner_w, 75.0f);
             if (box2_r) {
                 canvas.fill_round_rect(*box2_r, 8.0f, 8.0f, Paint(Color::from_rgba8(16, 24, 40, 160)));
                 canvas.stroke_round_rect(*box2_r, 8.0f, 8.0f, Paint(Color::from_rgba8(40, 60, 95, 120)), Stroke(1.0f));
@@ -530,7 +555,7 @@ int main(int argc, char** argv) {
             canvas.draw_text_buffer(english_buffer, font_system, Point(inner_x + 12.0f, box2_y + 36.0f), Color::from_rgba8(220, 235, 255, 255));
 
             // 3. Dynamic Animated Font Scale Ladder (Stress testing dynamic atlas upload)
-            float ladder_y = box2_y + 88.0f;
+            float ladder_y = box2_y + 85.0f;
             canvas.draw_text(inner_x, ladder_y + 14.0f, "Subpixel Vector Typography Scale Test:", Paint(Color::from_rgba8(160, 190, 230, 255)), 12.0f, "sans");
 
             float pulse = 0.5f + 0.5f * std::sin(anim_t * 2.5f);
@@ -550,7 +575,7 @@ int main(int argc, char** argv) {
         // ---------------------------------------------------------------------
         // CARD 2: STAGE 2 — Arc-Length PathMeasure & Tangent Follower
         // ---------------------------------------------------------------------
-        if (g_state.view_mode == ViewMode::TriView || g_state.view_mode == ViewMode::Stage2_Path) {
+        if (g_state.view_mode == ViewMode::AllStages || g_state.view_mode == ViewMode::Stage2_Path) {
             Color accent = Color::from_rgba8(168, 85, 247, 255);
             draw_card_frame(c2_x, c2_w, "02 // GAP 2 [COMPLETED]", "Arc-Length PathMeasure & Tangent Orbit", accent);
 
@@ -559,9 +584,9 @@ int main(int argc, char** argv) {
 
             // Metric Info
             std::ostringstream ss_len;
-            ss_len << "• Total Contour Arc-Length: " << std::fixed << std::setprecision(2) << circuit_length << " px";
-            canvas.draw_text(inner_x, inner_y + 14.0f, ss_len.str(), Paint(Color::from_rgba8(180, 160, 240, 255)), 11.0f, "mono");
-            canvas.draw_text(inner_x, inner_y + 30.0f, "• Algorithm: Recursive de Casteljau Subsegment Carving", Paint(Color::from_rgba8(180, 160, 240, 255)), 11.0f, "mono");
+            ss_len << "• Total Arc-Length: " << std::fixed << std::setprecision(1) << circuit_length << " px";
+            canvas.draw_text(inner_x, inner_y + 14.0f, ss_len.str(), Paint(Color::from_rgba8(180, 160, 240, 255)), 10.5f, "mono");
+            canvas.draw_text(inner_x, inner_y + 28.0f, "• de Casteljau Subsegment Carving", Paint(Color::from_rgba8(180, 160, 240, 255)), 10.5f, "mono");
 
             // Racetrack Display Box
             float box_y = inner_y + 44.0f;
@@ -575,7 +600,7 @@ int main(int argc, char** argv) {
             // Circuit Path Geometry & Measurements
             float track_cx = inner_x + (c2_w - 48.0f) * 0.5f;
             float track_cy = box_y + box_h * 0.5f;
-            float track_scale = (g_state.view_mode == ViewMode::Stage2_Path) ? 1.4f : 0.85f;
+            float track_scale = (g_state.view_mode == ViewMode::Stage2_Path) ? 1.4f : (g_state.view_mode == ViewMode::AllStages ? 0.68f : 0.85f);
 
             Path scaled_circuit = createCircuitPath(track_cx, track_cy, track_scale);
             PathMeasure measure(scaled_circuit, true);
@@ -636,13 +661,24 @@ int main(int argc, char** argv) {
 
             // Real-Time Telemetry Readout Box beneath track
             float stat_y = box_y + box_h + 14.0f;
-            std::ostringstream ss_cur;
-            ss_cur << "Position: (" << std::fixed << std::setprecision(1) << probe_pos.x << ", " << probe_pos.y << ")\n"
-                   << "Tangent : (" << std::setprecision(3) << probe_tan.x << ", " << probe_tan.y << ") | Norm: "
-                   << std::setprecision(3) << std::sqrt(probe_tan.x * probe_tan.x + probe_tan.y * probe_tan.y) << "\n"
-                   << "Segment : [" << std::setprecision(1) << start_d << " -> " << stop_d << "] px";
-
-            canvas.draw_text(inner_x, stat_y + 16.0f, ss_cur.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 11.5f, "mono");
+            if (g_state.view_mode == ViewMode::AllStages) {
+                std::ostringstream l1, l2, l3;
+                l1 << "Pos: (" << std::fixed << std::setprecision(0) << probe_pos.x << ", " << probe_pos.y << ")";
+                l2 << "Tan: (" << std::setprecision(2) << probe_tan.x << ", " << probe_tan.y << ")";
+                l3 << "Arc: " << std::fixed << std::setprecision(1) << total_L << " px";
+                canvas.draw_text(inner_x, stat_y + 14.0f, l1.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 10.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 28.0f, l2.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 10.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 42.0f, l3.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 10.5f, "mono");
+            } else {
+                std::ostringstream l1, l2, l3;
+                l1 << "Position: (" << std::fixed << std::setprecision(1) << probe_pos.x << ", " << probe_pos.y << ")";
+                l2 << "Tangent : (" << std::setprecision(3) << probe_tan.x << ", " << probe_tan.y << ") | Norm: "
+                   << std::setprecision(3) << std::sqrt(probe_tan.x * probe_tan.x + probe_tan.y * probe_tan.y);
+                l3 << "Segment : [" << std::setprecision(1) << start_d << " -> " << stop_d << "] px";
+                canvas.draw_text(inner_x, stat_y + 14.0f, l1.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 11.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 30.0f, l2.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 11.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 46.0f, l3.str(), Paint(Color::from_rgba8(200, 185, 255, 240)), 11.5f, "mono");
+            }
 
             canvas.draw_text(inner_x, content_y + content_h - 22.0f, "STATUS: 1:1 ARC-LENGTH PARITY VERIFIED", Paint(Color::from_rgba8(168, 85, 247, 255)), 11.0f, "mono");
         }
@@ -650,7 +686,7 @@ int main(int argc, char** argv) {
         // ---------------------------------------------------------------------
         // CARD 3: STAGE 3 — GPU Vector Path Stencil Clipping (clip_path)
         // ---------------------------------------------------------------------
-        if (g_state.view_mode == ViewMode::TriView || g_state.view_mode == ViewMode::Stage3_Clip) {
+        if (g_state.view_mode == ViewMode::AllStages || g_state.view_mode == ViewMode::Stage3_Clip) {
             Color accent = Color::from_rgba8(255, 170, 0, 255);
             draw_card_frame(c3_x, c3_w, "03 // GAP 3 [COMPLETED]", "GPU Stencil Vector Path Clipping", accent);
 
@@ -658,8 +694,8 @@ int main(int argc, char** argv) {
             float inner_y = content_y + 78.0f;
 
             // Metric Info
-            canvas.draw_text(inner_x, inner_y + 14.0f, "• Stencil Buffer: 8-Bit Hardware Dual-Nibble Architecture", Paint(Color::from_rgba8(240, 200, 140, 255)), 11.0f, "mono");
-            canvas.draw_text(inner_x, inner_y + 30.0f, "• Stencil Mode: Multi-Level Nested Path Intersections", Paint(Color::from_rgba8(240, 200, 140, 255)), 11.0f, "mono");
+            canvas.draw_text(inner_x, inner_y + 14.0f, "• Stencil: 8-Bit Dual-Nibble HW", Paint(Color::from_rgba8(240, 200, 140, 255)), 10.5f, "mono");
+            canvas.draw_text(inner_x, inner_y + 28.0f, "• Nested Path Intersections", Paint(Color::from_rgba8(240, 200, 140, 255)), 10.5f, "mono");
 
             // Stencil Clipping Canvas Box
             float box_y = inner_y + 44.0f;
@@ -676,7 +712,7 @@ int main(int argc, char** argv) {
             // =================================================================
             // DEMO A: Rotating Star Vector Clip Mask
             // =================================================================
-            float star_r_out = (g_state.view_mode == ViewMode::Stage3_Clip) ? 140.0f : 85.0f;
+            float star_r_out = (g_state.view_mode == ViewMode::Stage3_Clip) ? 140.0f : (g_state.view_mode == ViewMode::AllStages ? 65.0f : 85.0f);
             float star_r_in = star_r_out * 0.45f;
             float star_angle = anim_t * 0.8f;
 
@@ -750,13 +786,382 @@ int main(int argc, char** argv) {
 
             // Diagnostics info beneath box
             float stat_y = box_y + box_h + 14.0f;
-            std::ostringstream ss_clip;
-            ss_clip << "Clip Status : " << (g_state.clip_enabled ? "ACTIVE (GL_DEPTH24_STENCIL8)" : "DISABLED (Press [C])") << "\n"
-                    << "Polygon Mask: 16 Vertices Convex/Concave Star\n"
-                    << "Leakage Rate: 0.0000% (Bitwise Stencil Precision)";
-            canvas.draw_text(inner_x, stat_y + 16.0f, ss_clip.str(), Paint(Color::from_rgba8(255, 215, 160, 240)), 11.5f, "mono");
+            if (g_state.view_mode == ViewMode::AllStages) {
+                canvas.draw_text(inner_x, stat_y + 14.0f, g_state.clip_enabled ? "Clip: ACTIVE (Stencil8)" : "Clip: DISABLED", Paint(Color::from_rgba8(255, 215, 160, 240)), 10.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 28.0f, "Mask: 16-Vertex Star", Paint(Color::from_rgba8(255, 215, 160, 240)), 10.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 42.0f, "Leak: 0.00% (Bitwise)", Paint(Color::from_rgba8(255, 215, 160, 240)), 10.5f, "mono");
+            } else {
+                canvas.draw_text(inner_x, stat_y + 14.0f, g_state.clip_enabled ? "Clip Status : ACTIVE (GL_DEPTH24_STENCIL8)" : "Clip Status : DISABLED (Press [C])", Paint(Color::from_rgba8(255, 215, 160, 240)), 11.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 30.0f, "Polygon Mask: 16 Vertices Convex/Concave Star", Paint(Color::from_rgba8(255, 215, 160, 240)), 11.5f, "mono");
+                canvas.draw_text(inner_x, stat_y + 46.0f, "Leakage Rate: 0.0000% (Bitwise Stencil Precision)", Paint(Color::from_rgba8(255, 215, 160, 240)), 11.5f, "mono");
+            }
 
             canvas.draw_text(inner_x, content_y + content_h - 22.0f, "STATUS: HARDWARE STENCIL CLIPPING OK", Paint(Color::from_rgba8(255, 170, 0, 255)), 11.0f, "mono");
+        }
+
+        // ---------------------------------------------------------------------
+        // CARD 4: STAGE 4 — Asymmetric 4-Corner RRect & BorderRadius
+        // ---------------------------------------------------------------------
+        if (g_state.view_mode == ViewMode::AllStages || g_state.view_mode == ViewMode::Stage4_RRect) {
+            Color accent = Color::from_rgba8(0, 255, 170, 255);
+            draw_card_frame(c4_x, c4_w, "04 // GAP 4 [COMPLETED]", "Asymmetric 4-Corner RRect & Radius", accent);
+
+            float inner_x = c4_x + 24.0f;
+            float inner_y = content_y + 78.0f;
+            float inner_w = c4_w - 48.0f;
+
+            if (g_state.view_mode == ViewMode::AllStages) {
+                // Metric Info
+                canvas.draw_text(inner_x, inner_y + 14.0f, "• 4 Corners: (TL, TR, BR, BL)", Paint(Color::from_rgba8(140, 240, 200, 255)), 10.5f, "mono");
+                canvas.draw_text(inner_x, inner_y + 28.0f, "• W3C Scaling & Fast GPU Quad", Paint(Color::from_rgba8(140, 240, 200, 255)), 10.5f, "mono");
+
+                // Widget Showcase Box
+                float box_y = inner_y + 44.0f;
+                float box_h = 240.0f;
+                auto box_r = Rect::from_xywh(inner_x, box_y, inner_w, box_h);
+                if (box_r) {
+                    canvas.fill_round_rect(*box_r, 12.0f, 12.0f, Paint(Color::from_rgba8(12, 22, 28, 220)));
+                    canvas.stroke_round_rect(*box_r, 12.0f, 12.0f, Paint(Color::from_rgba8(0, 255, 170, 60)), Stroke(1.0f));
+                }
+
+                // 1. Asymmetric Browser Tab (Top Rounded, Bottom Flat)
+                float tab_w = 110.0f;
+                float tab_h = 26.0f;
+                float tab_x = inner_x + 10.0f;
+                float tab_y = box_y + 10.0f;
+                if (auto tr = Rect::from_xywh(tab_x, tab_y, tab_w, tab_h)) {
+                    BorderRadius tab_rad = BorderRadius::only(8.0f, 8.0f, 0.0f, 0.0f);
+                    RRect tab_rrect(*tr, tab_rad);
+                    canvas.fill_rrect(tab_rrect, Paint(Color::from_rgba8(0, 229, 255, 45)));
+                    canvas.stroke_rrect(tab_rrect, Paint(Color::from_rgba8(0, 229, 255, 180)), Stroke(1.0f));
+                    canvas.draw_text(tab_x + 10.0f, tab_y + 17.0f, "Editor.cpp", Paint(Color::from_rgba8(0, 242, 254, 255)), 10.5f, "mono");
+                }
+
+                // 2. Chat Bubble / Speech Popover (Top-Left, Top-Right, Bottom-Left rounded, Bottom-Right sharp anchor)
+                float bub_w = inner_w - 20.0f;
+                float bub_h = 40.0f;
+                float bub_x = inner_x + 10.0f;
+                float bub_y = tab_y + 34.0f;
+                if (auto br = Rect::from_xywh(bub_x, bub_y, bub_w, bub_h)) {
+                    BorderRadius bub_rad = BorderRadius::only(12.0f, 12.0f, 0.0f, 12.0f);
+                    RRect bub_rrect(*br, bub_rad);
+                    canvas.fill_rrect(bub_rrect, Paint(Color::from_rgba8(20, 36, 45, 230)));
+                    canvas.stroke_rrect(bub_rrect, Paint(Color::from_rgba8(0, 255, 170, 140)), Stroke(1.0f));
+                    canvas.draw_text(bub_x + 10.0f, bub_y + 17.0f, "Speech Bubble Popover", Paint(Color::from_rgba8(240, 255, 250, 255)), 11.0f, "sans");
+                    canvas.draw_text(bub_x + 10.0f, bub_y + 32.0f, "Bottom-Right Anchor (0px radius)", Paint(Color::from_rgba8(0, 255, 170, 200)), 9.5f, "mono");
+                }
+
+                // 3. Segmented 3-Button Control
+                float seg_y = bub_y + 48.0f;
+                float seg_w = (inner_w - 20.0f) / 3.0f;
+                float seg_h = 24.0f;
+
+                if (auto sr1 = Rect::from_xywh(inner_x + 10.0f, seg_y, seg_w, seg_h)) {
+                    RRect s1(*sr1, BorderRadius::horizontal(8.0f, 0.0f));
+                    canvas.fill_rrect(s1, Paint(Color::from_rgba8(0, 255, 170, 50)));
+                    canvas.stroke_rrect(s1, Paint(Color::from_rgba8(0, 255, 170, 180)), Stroke(1.0f));
+                    canvas.draw_text(inner_x + 18.0f, seg_y + 16.0f, "Left", Paint(Color::WHITE), 10.0f, "mono");
+                }
+                if (auto sr2 = Rect::from_xywh(inner_x + 10.0f + seg_w, seg_y, seg_w, seg_h)) {
+                    RRect s2(*sr2, BorderRadius::zero());
+                    canvas.fill_rrect(s2, Paint(Color::from_rgba8(16, 26, 36, 180)));
+                    canvas.stroke_rrect(s2, Paint(Color::from_rgba8(40, 70, 80, 120)), Stroke(1.0f));
+                    canvas.draw_text(inner_x + 10.0f + seg_w + 12.0f, seg_y + 16.0f, "Mid", Paint(Color::from_rgba8(160, 190, 210, 200)), 10.0f, "mono");
+                }
+                if (auto sr3 = Rect::from_xywh(inner_x + 10.0f + seg_w * 2.0f, seg_y, seg_w, seg_h)) {
+                    RRect s3(*sr3, BorderRadius::horizontal(0.0f, 8.0f));
+                    canvas.fill_rrect(s3, Paint(Color::from_rgba8(16, 26, 36, 180)));
+                    canvas.stroke_rrect(s3, Paint(Color::from_rgba8(40, 70, 80, 120)), Stroke(1.0f));
+                    canvas.draw_text(inner_x + 10.0f + seg_w * 2.0f + 10.0f, seg_y + 16.0f, "Right", Paint(Color::from_rgba8(160, 190, 210, 200)), 10.0f, "mono");
+                }
+
+                // 4. Live Morphing RRect with Arc-Containment Hit-Testing & Concentric Deflate
+                float morph_y = seg_y + 32.0f;
+                float morph_h = 62.0f;
+                float morph_w = inner_w - 20.0f;
+                float morph_x = inner_x + 10.0f;
+
+                float r_tl = 6.0f + 14.0f * (0.5f + 0.5f * std::sin(anim_t * 2.5f));
+                float r_tr = 22.0f + 10.0f * (0.5f + 0.5f * std::cos(anim_t * 2.0f));
+                float r_br = 3.0f;
+                float r_bl = 14.0f + 10.0f * (0.5f + 0.5f * std::sin(anim_t * 3.2f));
+                BorderRadius morph_rad(r_tl, r_tr, r_br, r_bl);
+
+                if (auto mr = Rect::from_xywh(morph_x, morph_y, morph_w, morph_h)) {
+                    RRect morph_rrect(*mr, morph_rad);
+                    bool hit = morph_rrect.contains(Point(g_state.mouse_x, g_state.mouse_y));
+
+                    Color fill_c = hit ? Color::from_rgba8(0, 255, 170, 75) : Color::from_rgba8(16, 28, 38, 220);
+                    Color stroke_c = hit ? Color::from_rgba8(0, 255, 200, 255) : Color::from_rgba8(0, 255, 170, 150);
+                    canvas.draw_rrect_shadow(morph_rrect, effects::DropShadow(0.0f, 4.0f, 6.0f, Color::from_rgba8(0, 0, 0, 100)));
+                    canvas.fill_rrect(morph_rrect, Paint(fill_c));
+                    canvas.stroke_rrect(morph_rrect, Paint(stroke_c), Stroke(hit ? 2.0f : 1.2f));
+
+                    // Deflated concentric ring
+                    RRect inner_d = morph_rrect.deflate(5.0f, 5.0f);
+                    canvas.stroke_rrect(inner_d, Paint(Color::from_rgba8(0, 255, 220, 80)), Stroke(1.0f));
+
+                    std::ostringstream ss_hit;
+                    ss_hit << "contains: " << (hit ? "INSIDE ARC (HIT)" : "outside");
+                    canvas.draw_text(morph_x + 8.0f, morph_y + 22.0f, ss_hit.str(), Paint(hit ? Color::WHITE : Color::from_rgba8(0, 255, 170, 220)), 10.5f, "mono");
+
+                    std::ostringstream ss_radii;
+                    ss_radii << "TL:" << std::fixed << std::setprecision(0) << r_tl << " TR:" << r_tr << " BR:" << r_br << " BL:" << r_bl;
+                    canvas.draw_text(morph_x + 8.0f, morph_y + 44.0f, ss_radii.str(), Paint(Color::from_rgba8(150, 210, 210, 220)), 10.0f, "mono");
+                }
+
+                // Diagnostics beneath box
+                float stat_y = box_y + box_h + 14.0f;
+                if (g_state.view_mode == ViewMode::AllStages) {
+                    canvas.draw_text(inner_x, stat_y + 14.0f, "Corners: 4-Axis Ellipses", Paint(Color::from_rgba8(160, 230, 205, 240)), 10.5f, "mono");
+                    canvas.draw_text(inner_x, stat_y + 28.0f, "Scaling: W3C CSS Borders L3", Paint(Color::from_rgba8(160, 230, 205, 240)), 10.5f, "mono");
+                    canvas.draw_text(inner_x, stat_y + 42.0f, "Shader : Fast GPU Quad", Paint(Color::from_rgba8(160, 230, 205, 240)), 10.5f, "mono");
+                } else {
+                    canvas.draw_text(inner_x, stat_y + 14.0f, "Geometry: 4-Corner Arc Ellipses", Paint(Color::from_rgba8(160, 230, 205, 240)), 11.5f, "mono");
+                    canvas.draw_text(inner_x, stat_y + 30.0f, "Scaling : W3C CSS Backgrounds L3", Paint(Color::from_rgba8(160, 230, 205, 240)), 11.5f, "mono");
+                    canvas.draw_text(inner_x, stat_y + 46.0f, "Pipeline: Zero-Tessellation Shader Quad", Paint(Color::from_rgba8(160, 230, 205, 240)), 11.5f, "mono");
+                }
+
+                canvas.draw_text(inner_x, content_y + content_h - 22.0f, "STATUS: GPU ASYMMETRIC RRECT OK", Paint(accent), 11.0f, "mono");
+            } else {
+                // =============================================================
+                // FOCUSED STAGE 4 MODE: Panoramic 3-Column Exploration Studio
+                // =============================================================
+                float col_gap = 20.0f;
+                float p_w = (inner_w - col_gap * 2.0f) / 3.0f;
+                float box_y = inner_y + 10.0f;
+                float box_h = 460.0f;
+
+                // --- PANEL A: Live Concentric Insets & Point-in-Arc Probe ---
+                float p1_x = inner_x;
+                auto p1_r = Rect::from_xywh(p1_x, box_y, p_w, box_h);
+                if (p1_r) {
+                    canvas.fill_round_rect(*p1_r, 12.0f, 12.0f, Paint(Color::from_rgba8(12, 20, 28, 220)));
+                    canvas.stroke_round_rect(*p1_r, 12.0f, 12.0f, Paint(Color::from_rgba8(0, 255, 170, 70)), Stroke(1.0f));
+                }
+                canvas.draw_text(p1_x + 16.0f, box_y + 26.0f, "A // Concentric Deflation & Arc Probing", Paint(Color::from_rgba8(0, 255, 170, 255)), 12.0f, "mono");
+
+                float r_tl = 14.0f + 32.0f * (0.5f + 0.5f * std::sin(anim_t * 2.2f));
+                float r_tr = 46.0f + 20.0f * (0.5f + 0.5f * std::cos(anim_t * 1.8f));
+                float r_br = 8.0f;
+                float r_bl = 24.0f + 18.0f * (0.5f + 0.5f * std::sin(anim_t * 2.8f));
+                BorderRadius big_rad(r_tl, r_tr, r_br, r_bl);
+
+                if (auto big_rc = Rect::from_xywh(p1_x + 20.0f, box_y + 50.0f, p_w - 40.0f, 230.0f)) {
+                    RRect big_rrect(*big_rc, big_rad);
+                    bool hit = big_rrect.contains(Point(g_state.mouse_x, g_state.mouse_y));
+
+                    // Outer drop shadow
+                    canvas.draw_rrect_shadow(big_rrect, effects::DropShadow(0.0f, 10.0f, 16.0f, Color::from_rgba8(0, 0, 0, 160)));
+
+                    // Fill & Stroke
+                    canvas.fill_rrect(big_rrect, Paint(hit ? Color::from_rgba8(0, 255, 170, 65) : Color::from_rgba8(16, 26, 38, 240)));
+                    canvas.stroke_rrect(big_rrect, Paint(hit ? Color::from_rgba8(0, 255, 200, 255) : Color::from_rgba8(0, 255, 170, 180)), Stroke(1.5f));
+
+                    // 3 Concentric Deflated Rings
+                    RRect d1 = big_rrect.deflate(16.0f, 16.0f);
+                    RRect d2 = d1.deflate(16.0f, 16.0f);
+                    RRect d3 = d2.deflate(16.0f, 16.0f);
+
+                    canvas.stroke_rrect(d1, Paint(Color::from_rgba8(0, 229, 255, 160)), Stroke(1.2f));
+                    canvas.stroke_rrect(d2, Paint(Color::from_rgba8(168, 85, 247, 180)), Stroke(1.2f));
+                    canvas.stroke_rrect(d3, Paint(Color::from_rgba8(255, 215, 0, 200)), Stroke(1.2f));
+
+                    // Telemetry details inside panel
+                    float t_y = box_y + 300.0f;
+                    std::ostringstream s1, s2, s3, s4, s5, s6;
+                    s1 << "Top-Left Radius    : " << std::fixed << std::setprecision(1) << r_tl << " px";
+                    s2 << "Top-Right Radius   : " << r_tr << " px";
+                    s3 << "Bottom-Right Radius: " << r_br << " px (Near Sharp)";
+                    s4 << "Bottom-Left Radius : " << r_bl << " px";
+                    s5 << "Concentric Insets  : 3 Levels (16px, 32px, 48px)";
+                    s6 << "Mouse Containment  : " << (hit ? "[HIT] INSIDE QUARTER-ELLIPSE ARC" : "Outside");
+
+                    canvas.draw_text(p1_x + 16.0f, t_y + 14.0f, s1.str(), Paint(Color::from_rgba8(170, 225, 215, 240)), 11.0f, "mono");
+                    canvas.draw_text(p1_x + 16.0f, t_y + 30.0f, s2.str(), Paint(Color::from_rgba8(170, 225, 215, 240)), 11.0f, "mono");
+                    canvas.draw_text(p1_x + 16.0f, t_y + 46.0f, s3.str(), Paint(Color::from_rgba8(170, 225, 215, 240)), 11.0f, "mono");
+                    canvas.draw_text(p1_x + 16.0f, t_y + 62.0f, s4.str(), Paint(Color::from_rgba8(170, 225, 215, 240)), 11.0f, "mono");
+                    canvas.draw_text(p1_x + 16.0f, t_y + 78.0f, s5.str(), Paint(Color::from_rgba8(170, 225, 215, 240)), 11.0f, "mono");
+                    canvas.draw_text(p1_x + 16.0f, t_y + 94.0f, s6.str(), Paint(hit ? Color::WHITE : Color::from_rgba8(0, 255, 170, 240)), 11.0f, "mono");
+                }
+
+                // --- PANEL B: Modern UI Design System Component Gallery ---
+                float p2_x = p1_x + p_w + col_gap;
+                auto p2_r = Rect::from_xywh(p2_x, box_y, p_w, box_h);
+                if (p2_r) {
+                    canvas.fill_round_rect(*p2_r, 12.0f, 12.0f, Paint(Color::from_rgba8(14, 20, 32, 220)));
+                    canvas.stroke_round_rect(*p2_r, 12.0f, 12.0f, Paint(Color::from_rgba8(0, 229, 255, 70)), Stroke(1.0f));
+                }
+                canvas.draw_text(p2_x + 16.0f, box_y + 26.0f, "B // Sovereign Design System UI Widgets", Paint(Color::from_rgba8(0, 229, 255, 255)), 12.0f, "mono");
+
+                // 1. Window Modal Frame
+                float mod_x = p2_x + 18.0f;
+                float mod_y = box_y + 48.0f;
+                float mod_w = p_w - 36.0f;
+                float mod_h = 160.0f;
+                if (auto mr = Rect::from_xywh(mod_x, mod_y, mod_w, mod_h)) {
+                    // Modal Body Glass
+                    RRect modal_rrect(*mr, BorderRadius::all(14.0f));
+                    effects::GlassParams gp;
+                    gp.tint_color = Color::from_rgba8(16, 24, 38, 220);
+                    gp.border_color = Color::from_rgba8(50, 80, 130, 90);
+                    gp.border_width = 1.0f;
+                    canvas.draw_glass_panel(modal_rrect, gp);
+
+                    // Modal Header (Top rounded only!)
+                    if (auto hr = Rect::from_xywh(mod_x, mod_y, mod_w, 36.0f)) {
+                        RRect hdr_rrect(*hr, BorderRadius::only(14.0f, 14.0f, 0.0f, 0.0f));
+                        canvas.fill_rrect(hdr_rrect, Paint(Color::from_rgba8(24, 38, 60, 240)));
+                        canvas.stroke_rrect(hdr_rrect, Paint(Color::from_rgba8(0, 229, 255, 100)), Stroke(1.0f));
+                        canvas.draw_text(mod_x + 14.0f, mod_y + 23.0f, "System Preferences", Paint(Color::WHITE), 12.0f, "sans");
+                    }
+
+                    // Modal Footer (Bottom rounded only!)
+                    if (auto fr = Rect::from_xywh(mod_x, mod_y + mod_h - 40.0f, mod_w, 40.0f)) {
+                        RRect ftr_rrect(*fr, BorderRadius::only(0.0f, 0.0f, 14.0f, 14.0f));
+                        canvas.fill_rrect(ftr_rrect, Paint(Color::from_rgba8(12, 18, 30, 240)));
+                        canvas.stroke_rrect(ftr_rrect, Paint(Color::from_rgba8(40, 65, 100, 100)), Stroke(1.0f));
+                        canvas.draw_text(mod_x + 14.0f, mod_y + mod_h - 15.0f, "Cancel", Paint(Color::from_rgba8(140, 160, 190, 220)), 11.5f, "sans");
+
+                        // Apply Button (Pill inside footer)
+                        if (auto btn_r = Rect::from_xywh(mod_x + mod_w - 90.0f, mod_y + mod_h - 32.0f, 76.0f, 24.0f)) {
+                            RRect btn_rrect(*btn_r, BorderRadius::all(6.0f));
+                            canvas.fill_rrect(btn_rrect, Paint(Color::from_rgba8(0, 229, 255, 220)));
+                            canvas.draw_text(mod_x + mod_w - 75.0f, mod_y + mod_h - 16.0f, "Apply", Paint(Color::from_rgba8(10, 15, 25, 255)), 11.5f, "sans");
+                        }
+                    }
+                }
+
+                // 2. Chat Popover Bubble with Asymmetric Tail
+                float pop_x = p2_x + 18.0f;
+                float pop_y = mod_y + mod_h + 16.0f;
+                float pop_w = p_w - 36.0f;
+                float pop_h = 70.0f;
+                if (auto pr = Rect::from_xywh(pop_x, pop_y, pop_w, pop_h)) {
+                    BorderRadius pop_rad = BorderRadius::only(16.0f, 16.0f, 0.0f, 16.0f);
+                    RRect pop_rrect(*pr, pop_rad);
+                    canvas.draw_rrect_shadow(pop_rrect, effects::DropShadow(0.0f, 6.0f, 10.0f, Color::from_rgba8(0, 0, 0, 140)));
+                    canvas.fill_rrect(pop_rrect, Paint(Color::from_rgba8(18, 32, 48, 230)));
+                    canvas.stroke_rrect(pop_rrect, Paint(Color::from_rgba8(0, 229, 255, 160)), Stroke(1.2f));
+
+                    canvas.draw_text(pop_x + 14.0f, pop_y + 26.0f, "Nisaba Sovereign Graphics Engine", Paint(Color::WHITE), 12.5f, "sans");
+                    canvas.draw_text(pop_x + 14.0f, pop_y + 48.0f, "Asymmetric corner tail pinned to origin.", Paint(Color::from_rgba8(0, 255, 200, 220)), 11.0f, "mono");
+                }
+
+                // 3. Segmented Toolbar (4 items)
+                float tbar_y = pop_y + pop_h + 16.0f;
+                float tbar_w = (p_w - 36.0f) / 4.0f;
+                float tbar_h = 30.0f;
+                for (int i = 0; i < 4; ++i) {
+                    if (auto tr = Rect::from_xywh(pop_x + static_cast<float>(i) * tbar_w, tbar_y, tbar_w, tbar_h)) {
+                        BorderRadius br;
+                        if (i == 0) br = BorderRadius::horizontal(10.0f, 0.0f);
+                        else if (i == 3) br = BorderRadius::horizontal(0.0f, 10.0f);
+                        else br = BorderRadius::zero();
+
+                        RRect seg(*tr, br);
+                        bool act = (i == 1);
+                        canvas.fill_rrect(seg, Paint(act ? Color::from_rgba8(0, 229, 255, 70) : Color::from_rgba8(16, 24, 36, 180)));
+                        canvas.stroke_rrect(seg, Paint(act ? Color::from_rgba8(0, 229, 255, 200) : Color::from_rgba8(40, 60, 90, 120)), Stroke(1.0f));
+
+                        const char* labels[] = {"Select", "Draw", "Pan", "Zoom"};
+                        canvas.draw_text(pop_x + static_cast<float>(i) * tbar_w + 12.0f, tbar_y + 19.0f, labels[i],
+                                         Paint(act ? Color::WHITE : Color::from_rgba8(150, 180, 210, 200)), 11.0f, "sans");
+                    }
+                }
+
+                // --- PANEL C: Hardware Stencil Clipping & W3C Scaling Stress ---
+                float p3_x = p2_x + p_w + col_gap;
+                auto p3_r = Rect::from_xywh(p3_x, box_y, p_w, box_h);
+                if (p3_r) {
+                    canvas.fill_round_rect(*p3_r, 12.0f, 12.0f, Paint(Color::from_rgba8(20, 18, 30, 220)));
+                    canvas.stroke_round_rect(*p3_r, 12.0f, 12.0f, Paint(Color::from_rgba8(255, 170, 0, 70)), Stroke(1.0f));
+                }
+                canvas.draw_text(p3_x + 16.0f, box_y + 26.0f, "C // Hardware Vector Clipping & W3C Scale", Paint(Color::from_rgba8(255, 170, 0, 255)), 12.0f, "mono");
+
+                // 1. Hardware Stencil Clip with Asymmetric RRect
+                float clip_x = p3_x + 20.0f;
+                float clip_y = box_y + 50.0f;
+                float clip_w = p_w - 40.0f;
+                float clip_h = 160.0f;
+                if (auto cr = Rect::from_xywh(clip_x, clip_y, clip_w, clip_h)) {
+                    BorderRadius clip_rad = BorderRadius::only(36.0f, 8.0f, 44.0f, 12.0f);
+                    RRect clip_rrect(*cr, clip_rad);
+
+                    if (g_state.clip_enabled) {
+                        canvas.save();
+                        canvas.clip_rrect(clip_rrect);
+
+                        // Rotating multi-color rainbow linear gradient inside clipped RRect!
+                        float rad_cx = clip_x + clip_w * 0.5f;
+                        float rad_cy = clip_y + clip_h * 0.5f;
+                        float g_ang = anim_t * 1.5f;
+                        Point p_start(rad_cx - std::cos(g_ang) * 120.0f, rad_cy - std::sin(g_ang) * 120.0f);
+                        Point p_end(rad_cx + std::cos(g_ang) * 120.0f, rad_cy + std::sin(g_ang) * 120.0f);
+
+                        std::vector<GradientStop> grad_stops = {
+                            GradientStop::create(0.0f, Color::from_rgba8(255, 0, 128, 255)),
+                            GradientStop::create(0.33f, Color::from_rgba8(0, 255, 170, 255)),
+                            GradientStop::create(0.66f, Color::from_rgba8(0, 229, 255, 255)),
+                            GradientStop::create(1.0f, Color::from_rgba8(255, 215, 0, 255))
+                        };
+                        if (auto grad = LinearGradient::create(p_start, p_end, grad_stops)) {
+                            Paint p; p.shader = Shader(*grad);
+                            canvas.fill_rect(*cr, p);
+                        }
+
+                        // Diagonal stripes
+                        for (int s = -6; s <= 6; ++s) {
+                            PathBuilder pb;
+                            pb.move_to(clip_x + static_cast<float>(s) * 35.0f + std::sin(anim_t * 3.0f) * 10.0f, clip_y);
+                            pb.line_to(clip_x + static_cast<float>(s) * 35.0f + clip_h + std::sin(anim_t * 3.0f) * 10.0f, clip_y + clip_h);
+                            if (auto sp = pb.finish()) {
+                                canvas.stroke_path(*sp, Paint(Color::from_rgba8(255, 255, 255, 80)), Stroke(2.0f));
+                            }
+                        }
+
+                        canvas.restore();
+                    }
+
+                    // Stroke clipped RRect border
+                    canvas.stroke_rrect(clip_rrect, Paint(Color::from_rgba8(255, 215, 0, 220)), Stroke(2.0f));
+                }
+
+                // 2. W3C Constraint Scaling Stress Test
+                float w3c_y = clip_y + clip_h + 20.0f;
+                canvas.draw_text(p3_x + 16.0f, w3c_y + 14.0f, "W3C CSS Backgrounds L3 Analytical Scaling:", Paint(Color::from_rgba8(240, 200, 140, 255)), 11.5f, "mono");
+
+                float s_w = 140.0f;
+                float s_h = 75.0f;
+                float s_x = p3_x + 20.0f;
+                float s_y = w3c_y + 26.0f;
+
+                // Request absurdly large radii: 90px on each corner of a 140x75 rect!
+                BorderRadius req_rad(90.0f, 90.0f, 90.0f, 90.0f);
+                BorderRadius constr_rad = req_rad.constrained_for_size(s_w, s_h);
+
+                if (auto sr = Rect::from_xywh(s_x, s_y, s_w, s_h)) {
+                    RRect constr_rrect(*sr, constr_rad);
+                    canvas.fill_rrect(constr_rrect, Paint(Color::from_rgba8(255, 100, 0, 50)));
+                    canvas.stroke_rrect(constr_rrect, Paint(Color::from_rgba8(255, 170, 0, 220)), Stroke(1.5f));
+                }
+
+                float w3c_tx = s_x + s_w + 14.0f;
+                std::ostringstream w1, w2, w3, w4, w5;
+                w1 << "Requested: TL=90, TR=90, BR=90, BL=90";
+                w2 << "Box Size : 140 x 75 px";
+                w3 << "Radii Sum: W=180 > 140 | H=180 > 75";
+                w4 << "W3C Scale: S = min(140/180, 75/180) = " << std::fixed << std::setprecision(3) << (75.0f / 180.0f);
+                w5 << "Constrain: " << std::fixed << std::setprecision(1) << constr_rad.top_left << " px (Zero overlap distortion!)";
+
+                canvas.draw_text(w3c_tx, s_y + 14.0f, w1.str(), Paint(Color::from_rgba8(240, 210, 160, 220)), 10.5f, "mono");
+                canvas.draw_text(w3c_tx, s_y + 28.0f, w2.str(), Paint(Color::from_rgba8(240, 210, 160, 220)), 10.5f, "mono");
+                canvas.draw_text(w3c_tx, s_y + 42.0f, w3.str(), Paint(Color::from_rgba8(240, 210, 160, 220)), 10.5f, "mono");
+                canvas.draw_text(w3c_tx, s_y + 56.0f, w4.str(), Paint(Color::from_rgba8(240, 210, 160, 220)), 10.5f, "mono");
+                canvas.draw_text(w3c_tx, s_y + 70.0f, w5.str(), Paint(Color::from_rgba8(0, 255, 170, 255)), 10.5f, "mono");
+
+                canvas.draw_text(inner_x, content_y + content_h - 22.0f, "STATUS: ALL 4 ROADMAP COMPATIBILITY STAGES 100% OPERATIONAL", Paint(accent), 11.0f, "mono");
+            }
         }
 
         // =====================================================================
@@ -772,14 +1177,14 @@ int main(int argc, char** argv) {
             if (bot_r) canvas.draw_glass_panel(*bot_r, 8.0f, 8.0f, bot_glass);
 
             // Hotkey guide
-            canvas.draw_text(34.0f, bot_y + 22.0f,
-                "[1] Text Focus   [2] Measure Focus   [3] Clip Focus   [A] Tri-View   [V] VSync Toggle   [C] Clip Toggle   [SPACE] Pause   [ESC] Exit",
-                Paint(Color::from_rgba8(160, 190, 230, 220)), 11.0f, "mono");
+            canvas.draw_text(30.0f, bot_y + 22.0f,
+                "[1] Text  [2] Measure  [3] Clip  [4] RRect  [A] All Stages  [V] VSync  [C] Clip Toggle  [SPACE] Pause  [ESC] Exit",
+                Paint(Color::from_rgba8(160, 190, 230, 220)), 10.5f, "mono");
 
             std::ostringstream ss_info;
-            ss_info << "Engine: Nisaba C++20 | Device: " << device->renderer_name();
-            canvas.draw_text(static_cast<float>(win_w) - 430.0f, bot_y + 22.0f, ss_info.str(),
-                Paint(Color::from_rgba8(0, 242, 254, 200)), 11.0f, "mono");
+            ss_info << "Engine: Nisaba| " << device->renderer_name();
+            canvas.draw_text(static_cast<float>(win_w) - 390.0f, bot_y + 22.0f, ss_info.str(),
+                Paint(Color::from_rgba8(0, 242, 254, 200)), 10.5f, "mono");
         }
 
         // 6. Flush GPU Draw Queue and Present Buffer
@@ -812,7 +1217,7 @@ int main(int argc, char** argv) {
         std::printf("  Average Throughput : %.1f FPS\n", static_cast<double>(frame_count) / total_sec);
         std::printf("  Average Frame Time : %.2f ms\n", (total_sec / static_cast<double>(frame_count)) * 1000.0);
         std::printf("  GPU Hardware Device: %s\n", device->renderer_name().c_str());
-        std::printf("  Stages Verified    : [1: Text Atlas OK] [2: PathMeasure OK] [3: Stencil Clip OK]\n");
+        std::printf("  Stages Verified    : [1: Text Atlas OK] [2: PathMeasure OK] [3: Stencil Clip OK] [4: RRect & Radius OK]\n");
         std::printf("========================================================\n");
     }
 

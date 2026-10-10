@@ -367,6 +367,7 @@ void Context::clipPath(const nisaba::Path& p, Winding winding) {
 
 	materializePending();
 	m_commands.clear();
+	m_tessellator->clear();
 	path(p);
 	materializePending();
 
@@ -398,6 +399,7 @@ void Context::clipPath(const nisaba::Path& p, Winding winding) {
 		                       winding, s.clipDepth, s.scissor, m_tessellator->bounds());
 	}
 	m_commands.clear();
+	m_tessellator->clear();
 }
 
 void Context::restoreClip(int targetDepth) {

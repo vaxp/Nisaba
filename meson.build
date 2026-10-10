@@ -55,6 +55,7 @@ nisaba_sources = files(
   'src/svg/baked_svg.cpp',
   'src/svg/svg_cache.cpp',
   'src/math/transform4x4.cpp',
+  'src/math/rrect.cpp',
   'src/raster/perspective_raster.cpp',
   'src/mesh/mesh.cpp',
   'src/raster/mesh_raster.cpp',

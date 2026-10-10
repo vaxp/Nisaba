@@ -4,6 +4,8 @@
 #include <optional>
 #include "nisaba/math/point.hpp"
 #include "nisaba/math/rect.hpp"
+#include "nisaba/math/border_radius.hpp"
+#include "nisaba/math/rrect.hpp"
 #include "nisaba/path/path.hpp"
 #include "nisaba/path/path_geometry.hpp"
 
@@ -54,6 +56,18 @@ public:
     static std::optional<Path> from_rounded_rect(const Rect& rect, float rx, float ry) noexcept {
         PathBuilder b;
         b.push_rounded_rect(rect, rx, ry);
+        return b.finish();
+    }
+
+    static std::optional<Path> from_rounded_rect(const Rect& rect, const BorderRadius& radii) noexcept {
+        PathBuilder b;
+        b.push_rounded_rect(rect, radii);
+        return b.finish();
+    }
+
+    static std::optional<Path> from_rrect(const RRect& rrect) noexcept {
+        PathBuilder b;
+        b.push_rrect(rrect);
         return b.finish();
     }
 
@@ -282,6 +296,76 @@ public:
         line_to(l, t + ry);
         cubic_to(l, t + ry - ky, l + rx - kx, t, l + rx, t);
         close();
+    }
+
+    void push_rounded_rect(const Rect& rect, const BorderRadius& radii) {
+        if (radii.is_zero()) {
+            push_rect(rect);
+            return;
+        }
+
+        BorderRadius cr = radii.constrained_for_size(rect.width(), rect.height());
+        if (cr.is_zero()) {
+            push_rect(rect);
+            return;
+        }
+
+        constexpr float KAPPA = 0.5522847498f;
+
+        float l = rect.left();
+        float t = rect.top();
+        float r = rect.right();
+        float b = rect.bottom();
+
+        float rtl = cr.top_left;
+        float rtr = cr.top_right;
+        float rbr = cr.bottom_right;
+        float rbl = cr.bottom_left;
+
+        // Start at top-left edge after top-left corner
+        move_to(l + rtl, t);
+
+        // Top edge
+        line_to(r - rtr, t);
+
+        // Top-right corner
+        if (rtr > 0.0f) {
+            float k = rtr * KAPPA;
+            cubic_to(r - rtr + k, t, r, t + rtr - k, r, t + rtr);
+        }
+
+        // Right edge
+        line_to(r, b - rbr);
+
+        // Bottom-right corner
+        if (rbr > 0.0f) {
+            float k = rbr * KAPPA;
+            cubic_to(r, b - rbr + k, r - rbr + k, b, r - rbr, b);
+        }
+
+        // Bottom edge
+        line_to(l + rbl, b);
+
+        // Bottom-left corner
+        if (rbl > 0.0f) {
+            float k = rbl * KAPPA;
+            cubic_to(l + rbl - k, b, l, b - rbl + k, l, b - rbl);
+        }
+
+        // Left edge
+        line_to(l, t + rtl);
+
+        // Top-left corner
+        if (rtl > 0.0f) {
+            float k = rtl * KAPPA;
+            cubic_to(l, t + rtl - k, l + rtl - k, t, l + rtl, t);
+        }
+
+        close();
+    }
+
+    void push_rrect(const RRect& rrect) {
+        push_rounded_rect(rrect.rect, rrect.radii);
     }
 
     const std::vector<Point>& points() const noexcept { return points_; }

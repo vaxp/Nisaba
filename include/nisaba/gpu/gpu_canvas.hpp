@@ -72,6 +72,13 @@ public:
     void fill_round_rect(const nisaba::Rect& rect, float rx, float ry, const nisaba::Paint& paint);
     void stroke_round_rect(const nisaba::Rect& rect, float rx, float ry, const nisaba::Paint& paint, const nisaba::Stroke& stroke);
 
+    void fill_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const nisaba::Paint& paint);
+    void stroke_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const nisaba::Paint& paint, const nisaba::Stroke& stroke);
+    void fill_rrect(const nisaba::RRect& rrect, const nisaba::Paint& paint) override;
+    void stroke_rrect(const nisaba::RRect& rrect, const nisaba::Paint& paint, const nisaba::Stroke& stroke) override;
+    void clip_rrect(const nisaba::RRect& rrect) override;
+    void clip_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii);
+
     void fill_circle(float cx, float cy, float radius, const nisaba::Paint& paint);
     void stroke_circle(float cx, float cy, float radius, const nisaba::Paint& paint, const nisaba::Stroke& stroke);
 
@@ -89,9 +96,13 @@ public:
 
     // --- Effects & Glassmorphism ---
     void draw_round_rect_shadow(const nisaba::Rect& rect, float rx, float ry, const effects::DropShadow& shadow);
+    void draw_rrect_shadow(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::DropShadow& shadow);
+    void draw_rrect_shadow(const nisaba::RRect& rrect, const effects::DropShadow& shadow);
     void draw_rect_shadow(const nisaba::Rect& rect, const effects::DropShadow& shadow);
     void draw_glow(const nisaba::Rect& rect, float rx, float ry, nisaba::Color glow_color, float radius);
     void draw_glass_panel(const nisaba::Rect& rect, float rx, float ry, const effects::GlassParams& params);
+    void draw_glass_panel(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::GlassParams& params);
+    void draw_glass_panel(const nisaba::RRect& rrect, const effects::GlassParams& params);
 
     // --- SVG Vector Graphics ---
     void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds);

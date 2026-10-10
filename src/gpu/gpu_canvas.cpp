@@ -271,6 +271,45 @@ void GpuCanvas::stroke_round_rect(const nisaba::Rect& rect, float rx, float ry, 
     context_->stroke();
 }
 
+void GpuCanvas::fill_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const nisaba::Paint& paint) {
+    if (!context_) return;
+    ensure_frame();
+    BorderRadius cr = radii.constrained_for_size(rect.width(), rect.height());
+    context_->beginPath();
+    context_->roundedRectVarying(rect.x(), rect.y(), rect.width(), rect.height(),
+                                 cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+    apply_fill_paint(paint);
+    context_->fill();
+}
+
+void GpuCanvas::stroke_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const nisaba::Paint& paint, const nisaba::Stroke& stroke) {
+    if (!context_) return;
+    ensure_frame();
+    auto path_opt = PathBuilder::from_rounded_rect(rect, radii);
+    if (path_opt) {
+        stroke_path(*path_opt, paint, stroke);
+    }
+}
+
+void GpuCanvas::fill_rrect(const nisaba::RRect& rrect, const nisaba::Paint& paint) {
+    fill_rrect(rrect.rect, rrect.radii, paint);
+}
+
+void GpuCanvas::stroke_rrect(const nisaba::RRect& rrect, const nisaba::Paint& paint, const nisaba::Stroke& stroke) {
+    stroke_rrect(rrect.rect, rrect.radii, paint, stroke);
+}
+
+void GpuCanvas::clip_rrect(const nisaba::RRect& rrect) {
+    auto path_opt = PathBuilder::from_rrect(rrect);
+    if (path_opt) {
+        clip_path(*path_opt, FillRule::Winding);
+    }
+}
+
+void GpuCanvas::clip_rrect(const nisaba::Rect& rect, const nisaba::BorderRadius& radii) {
+    clip_rrect(RRect(rect, radii));
+}
+
 void GpuCanvas::fill_circle(float cx, float cy, float radius, const nisaba::Paint& paint) {
     if (!context_) return;
     ensure_frame();
@@ -458,6 +497,22 @@ void GpuCanvas::draw_round_rect_shadow(const nisaba::Rect& rect, float rx, float
     context_->restore();
 }
 
+void GpuCanvas::draw_rrect_shadow(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::DropShadow& shadow) {
+    if (!context_) return;
+    ensure_frame();
+    if (radii.is_uniform()) {
+        draw_round_rect_shadow(rect, radii.top_left, radii.top_left, shadow);
+        return;
+    }
+    BorderRadius cr = radii.constrained_for_size(rect.width(), rect.height());
+    float avg_r = (cr.top_left + cr.top_right + cr.bottom_right + cr.bottom_left) * 0.25f;
+    draw_round_rect_shadow(rect, avg_r, avg_r, shadow);
+}
+
+void GpuCanvas::draw_rrect_shadow(const nisaba::RRect& rrect, const effects::DropShadow& shadow) {
+    draw_rrect_shadow(rrect.rect, rrect.radii, shadow);
+}
+
 void GpuCanvas::draw_rect_shadow(const nisaba::Rect& rect, const effects::DropShadow& shadow) {
     draw_round_rect_shadow(rect, 0.0f, 0.0f, shadow);
 }
@@ -467,31 +522,38 @@ void GpuCanvas::draw_glow(const nisaba::Rect& rect, float rx, float ry, nisaba::
     draw_round_rect_shadow(rect, rx, ry, shadow);
 }
 
-void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, float rx, float ry, const effects::GlassParams& params) {
+void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::GlassParams& params) {
     if (!context_) return;
     ensure_frame();
 
-    float r = std::min(rx, ry);
+    BorderRadius cr = radii.constrained_for_size(rect.width(), rect.height());
 
     // 1. Drop shadow if present
     if (params.shadow.has_value()) {
-        draw_round_rect_shadow(rect, rx, ry, *params.shadow);
+        draw_rrect_shadow(rect, cr, *params.shadow);
     }
 
     // 2. Glass tinted background
     context_->beginPath();
-    context_->roundedRect(rect.x(), rect.y(), rect.width(), rect.height(), r);
+    context_->roundedRectVarying(rect.x(), rect.y(), rect.width(), rect.height(),
+                                 cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
     context_->fillColor(params.tint_color);
     context_->fill();
 
     // 3. Crisp specular border stroke
     if (params.border_width > 0.0f && params.border_color.alpha() > 0.0f) {
-        context_->beginPath();
-        context_->roundedRect(rect.x() + 0.5f, rect.y() + 0.5f, rect.width() - 1.0f, rect.height() - 1.0f, r);
-        context_->strokeColor(params.border_color);
-        context_->strokeWidth(params.border_width);
-        context_->stroke();
+        if (auto path = PathBuilder::from_rounded_rect(rect, cr)) {
+            stroke_path(*path, nisaba::Paint(params.border_color), Stroke(params.border_width));
+        }
     }
+}
+
+void GpuCanvas::draw_glass_panel(const nisaba::RRect& rrect, const effects::GlassParams& params) {
+    draw_glass_panel(rrect.rect, rrect.radii, params);
+}
+
+void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, float rx, float ry, const effects::GlassParams& params) {
+    draw_glass_panel(rect, BorderRadius::all(std::min(rx, ry)), params);
 }
 
 void GpuCanvas::draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds) {

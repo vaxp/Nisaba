@@ -5,6 +5,8 @@
 
 #include "nisaba/math/transform.hpp"
 #include "nisaba/math/rect.hpp"
+#include "nisaba/math/border_radius.hpp"
+#include "nisaba/math/rrect.hpp"
 #include "nisaba/path/path.hpp"
 #include "nisaba/path/stroker.hpp"
 #include "nisaba/canvas/paint.hpp"
@@ -28,6 +30,16 @@ public:
     virtual void stroke_path(const Path& path, const Paint& paint, const Stroke& stroke) = 0;
     virtual void clip_path(const Path& path, FillRule fill_rule = FillRule::Winding) {
         (void)path; (void)fill_rule;
+    }
+
+    virtual void fill_rrect(const RRect& rrect, const Paint& paint) {
+        fill_path(rrect.to_path(), paint);
+    }
+    virtual void stroke_rrect(const RRect& rrect, const Paint& paint, const Stroke& stroke) {
+        stroke_path(rrect.to_path(), paint, stroke);
+    }
+    virtual void clip_rrect(const RRect& rrect) {
+        clip_path(rrect.to_path(), FillRule::Winding);
     }
 };
 

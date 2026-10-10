@@ -11,6 +11,8 @@
 #include "nisaba/math/point.hpp"
 #include "nisaba/math/size.hpp"
 #include "nisaba/math/rect.hpp"
+#include "nisaba/math/border_radius.hpp"
+#include "nisaba/math/rrect.hpp"
 #include "nisaba/math/transform.hpp"
 #include "nisaba/path/path_geometry.hpp"
 #include "nisaba/path/path.hpp"
