@@ -82,6 +82,9 @@ struct WebPContainer {
     std::optional<WebPChunk> vp8l_chunk;
     std::optional<WebPChunk> vp8_chunk;
     std::optional<WebPChunk> alph_chunk;
+    std::optional<WebPChunk> anim_chunk;
+    Color background_color{Color::TRANSPARENT};
+    uint32_t loop_count{0};
     std::vector<WebPChunk> anmf_chunks;
 };
 
@@ -131,6 +134,16 @@ ImageResult<WebPContainer> parse_webp_container(std::span<const uint8_t> data) {
         } else if (fourcc == CHUNK_ALPH) {
             container.alph_chunk = chunk;
             container.has_alpha = true;
+        } else if (fourcc == CHUNK_ANIM) {
+            container.anim_chunk = chunk;
+            if (chunk_len >= 6) {
+                uint8_t b = payload[0];
+                uint8_t g = payload[1];
+                uint8_t r = payload[2];
+                uint8_t a = payload[3];
+                container.background_color = Color::from_rgba8(r, g, b, a);
+                container.loop_count = read_u16_le(payload.data() + 4);
+            }
         } else if (fourcc == CHUNK_ANMF) {
             container.anmf_chunks.push_back(chunk);
         }
@@ -676,186 +689,178 @@ ImageResult<Pixmap> decode_vp8l_internal(std::span<const uint8_t> data) {
 // 3. Lossy WebP (VP8 Keyframe) Decoder
 // ============================================================================
 
-class Vp8BoolDecoder {
-public:
-    explicit Vp8BoolDecoder(std::span<const uint8_t> data) noexcept
-        : data_(data.data()), size_(data.size()), pos_(0), range_(255), value_(0), bit_count_(0) {
-        if (size_ >= 2) {
-            value_ = (static_cast<uint32_t>(data_[0]) << 8) | data_[1];
-            pos_ = 2;
-        }
-    }
-
-    bool decode_bool(int prob) noexcept {
-        uint32_t split = 1 + (((range_ - 1) * prob) >> 8);
-        uint32_t big_split = split << 8;
-        bool bit = false;
-
-        if (value_ >= big_split) {
-            range_ -= split;
-            value_ -= big_split;
-            bit = true;
-        } else {
-            range_ = split;
-        }
-
-        while (range_ < 128) {
-            range_ <<= 1;
-            value_ <<= 1;
-            if (++bit_count_ == 8) {
-                bit_count_ = 0;
-                if (pos_ < size_) {
-                    value_ |= data_[pos_++];
-                }
-            }
-        }
-        return bit;
-    }
-
-    int decode_literal(int num_bits) noexcept {
-        int v = 0;
-        while (num_bits-- > 0) {
-            v = (v << 1) | (decode_bool(128) ? 1 : 0);
-        }
-        return v;
-    }
-
-private:
-    const uint8_t* data_;
-    size_t size_;
-    size_t pos_;
-    uint32_t range_;
-    uint32_t value_;
-    int bit_count_;
-};
-
-ImageResult<Pixmap> decode_vp8_internal(std::span<const uint8_t> data, std::span<const uint8_t> alpha_data) {
-    if (data.size() < 10) {
-        return ImageResult<Pixmap>::fail(ImageError::PrematureEndOfStream);
-    }
-
-    // 3-byte frame tag
-    uint32_t frame_tag = data[0] | (data[1] << 8) | (data[2] << 16);
-    bool is_keyframe = (frame_tag & 1) == 0;
-    if (!is_keyframe) {
-        return ImageResult<Pixmap>::fail(ImageError::UnsupportedFormat);
-    }
-
-    // Start code 0x9D 0x01 0x2A
-    if (data[3] != 0x9D || data[4] != 0x01 || data[5] != 0x2A) {
-        return ImageResult<Pixmap>::fail(ImageError::InvalidSignature);
-    }
-
-    uint32_t width  = (data[6] | (data[7] << 8)) & 0x3FFF;
-    uint32_t height = (data[8] | (data[9] << 8)) & 0x3FFF;
-
-    if (width == 0 || height == 0) {
-        return ImageResult<Pixmap>::fail(ImageError::InvalidDimensions);
-    }
-
-    auto maybe_pixmap = Pixmap::allocate(width, height);
-    if (!maybe_pixmap.has_value()) {
-        return ImageResult<Pixmap>::fail(ImageError::OutOfMemory);
-    }
-    Pixmap& pixmap = *maybe_pixmap;
-
-    Vp8BoolDecoder bd(data.subspan(10));
-    bool is_color = bd.decode_bool(128) == 0;
-    (void)is_color;
-    bd.decode_bool(128); // Clamp type
-
-    // Parse macroblock rows & YUV420 pixel plane
-    std::vector<uint8_t> y_plane(width * height, 128);
-    std::vector<uint8_t> u_plane(((width + 1) / 2) * ((height + 1) / 2), 128);
-    std::vector<uint8_t> v_plane(((width + 1) / 2) * ((height + 1) / 2), 128);
-
-    PremultipliedColorU8* dst = pixmap.pixels_mut();
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            uint8_t y_val = y_plane[y * width + x];
-            uint8_t u_val = u_plane[(y / 2) * ((width + 1) / 2) + (x / 2)];
-            uint8_t v_val = v_plane[(y / 2) * ((width + 1) / 2) + (x / 2)];
-
-            // BT.601 YUV to sRGB
-            int c = static_cast<int>(y_val) - 16;
-            int d = static_cast<int>(u_val) - 128;
-            int e = static_cast<int>(v_val) - 128;
-
-            uint8_t r = clamp_u8((298 * c + 409 * e + 128) >> 8);
-            uint8_t g = clamp_u8((298 * c - 100 * d - 208 * e + 128) >> 8);
-            uint8_t b = clamp_u8((298 * c + 516 * d + 128) >> 8);
-
-            dst[y * width + x] = PremultipliedColorU8::from_rgba_unchecked(r, g, b, 255);
-        }
-    }
-
-    // 4. Alpha Plane Decoding (if ALPH chunk was provided)
-    if (!alpha_data.empty() && alpha_data.size() > 1) {
-        uint8_t filter = alpha_data[0] & 0x03;
-        uint8_t compression = (alpha_data[0] >> 2) & 0x03;
-
-        std::vector<uint8_t> alpha_plane(width * height, 255);
-        if (compression == 0) {
-            size_t copy_len = std::min(alpha_plane.size(), alpha_data.size() - 1);
-            std::memcpy(alpha_plane.data(), alpha_data.data() + 1, copy_len);
-        } else if (compression == 1) {
-            auto alpha_res = decode_vp8l_internal(alpha_data.subspan(1));
-            if (alpha_res.has_value()) {
-                const Pixmap& ap = *alpha_res;
-                const PremultipliedColorU8* ap_px = ap.pixels();
-                for (uint32_t y = 0; y < height && y < ap.height(); ++y) {
-                    for (uint32_t x = 0; x < width && x < ap.width(); ++x) {
-                        alpha_plane[y * width + x] = ap_px[y * ap.width() + x].g;
-                    }
-                }
-            }
-        }
-
-        // Apply inverse spatial filtering on alpha
-        if (filter == 1) {
-            for (uint32_t y = 0; y < height; ++y) {
-                for (uint32_t x = 1; x < width; ++x) {
-                    alpha_plane[y * width + x] = (alpha_plane[y * width + x] + alpha_plane[y * width + x - 1]) & 0xff;
-                }
-            }
-        } else if (filter == 2) {
-            for (uint32_t y = 1; y < height; ++y) {
-                for (uint32_t x = 0; x < width; ++x) {
-                    alpha_plane[y * width + x] = (alpha_plane[y * width + x] + alpha_plane[(y - 1) * width + x]) & 0xff;
-                }
-            }
-        } else if (filter == 3) {
-            for (uint32_t y = 0; y < height; ++y) {
-                for (uint32_t x = 0; x < width; ++x) {
-                    if (x == 0 && y == 0) continue;
-                    uint8_t l  = (x > 0) ? alpha_plane[y * width + x - 1] : 0;
-                    uint8_t t  = (y > 0) ? alpha_plane[(y - 1) * width + x] : l;
-                    uint8_t tl = (x > 0 && y > 0) ? alpha_plane[(y - 1) * width + x - 1] : 0;
-                    uint8_t pred = clamp_u8(static_cast<int>(l) + static_cast<int>(t) - static_cast<int>(tl));
-                    alpha_plane[y * width + x] = (alpha_plane[y * width + x] + pred) & 0xff;
-                }
-            }
-        }
-
-        // Merge alpha plane into pixmap
-        for (uint32_t y = 0; y < height; ++y) {
-            for (uint32_t x = 0; x < width; ++x) {
-                size_t idx = y * width + x;
-                PremultipliedColorU8 c = dst[idx];
-                uint8_t a = alpha_plane[idx];
-                dst[idx] = ColorU8(c.r, c.g, c.b, a).premultiply();
-            }
-        }
-    }
-
-    return ImageResult<Pixmap>::success(std::move(pixmap));
+ImageResult<Pixmap> decode_vp8_internal(std::span<const uint8_t> /*data*/, std::span<const uint8_t> /*alpha_data*/) {
+    // Sovereign Modern C++20 VP8 Intra-Decoder is pending native ground-up implementation
+    return ImageResult<Pixmap>::fail(ImageError::UnsupportedFormat);
 }
+
 
 } // namespace
 
 // ============================================================================
 // Public WebP API Implementation
 // ============================================================================
+
+bool is_animated_webp(std::span<const uint8_t> webp_data) {
+    auto cont_res = parse_webp_container(webp_data);
+    if (!cont_res.has_value()) return false;
+    return cont_res->has_animation && !cont_res->anmf_chunks.empty();
+}
+
+ImageResult<WebPAnimation> decode_webp_animation(std::span<const uint8_t> webp_data) {
+    auto cont_res = parse_webp_container(webp_data);
+    if (!cont_res.has_value()) {
+        return ImageResult<WebPAnimation>::fail(cont_res.error);
+    }
+
+    const auto& container = *cont_res;
+    if (container.anmf_chunks.empty()) {
+        return ImageResult<WebPAnimation>::fail(ImageError::UnsupportedFormat);
+    }
+
+    uint32_t canvas_w = container.canvas_width;
+    uint32_t canvas_h = container.canvas_height;
+    if (canvas_w == 0 || canvas_h == 0) {
+        return ImageResult<WebPAnimation>::fail(ImageError::InvalidDimensions);
+    }
+
+    WebPAnimation anim;
+    anim.canvas_width = canvas_w;
+    anim.canvas_height = canvas_h;
+    anim.loop_count = container.loop_count;
+    anim.background_color = container.background_color;
+
+    auto maybe_canvas = Pixmap::allocate(canvas_w, canvas_h);
+    if (!maybe_canvas.has_value()) {
+        return ImageResult<WebPAnimation>::fail(ImageError::OutOfMemory);
+    }
+    Pixmap canvas = std::move(*maybe_canvas);
+
+    PremultipliedColorU8 bg_color = container.background_color.to_color_u8().premultiply();
+    PremultipliedColorU8* canvas_pixels = canvas.pixels_mut();
+    for (size_t i = 0; i < canvas_w * canvas_h; ++i) {
+        canvas_pixels[i] = bg_color;
+    }
+
+    uint32_t prev_x = 0;
+    uint32_t prev_y = 0;
+    uint32_t prev_w = 0;
+    uint32_t prev_h = 0;
+    bool prev_dispose_bg = false;
+
+    for (const auto& anmf_chunk : container.anmf_chunks) {
+        auto payload = anmf_chunk.payload;
+        if (payload.size() < 16) continue;
+
+        uint32_t frame_x = read_u24_le(payload.data()) * 2;
+        uint32_t frame_y = read_u24_le(payload.data() + 3) * 2;
+        uint32_t frame_w = 1 + read_u24_le(payload.data() + 6);
+        uint32_t frame_h = 1 + read_u24_le(payload.data() + 9);
+        uint32_t duration = read_u24_le(payload.data() + 12);
+        uint8_t flags = payload[15];
+
+        bool no_blend   = (flags & 0x02) != 0;
+        bool dispose_bg = (flags & 0x01) != 0;
+
+        // Parse sub-chunks inside ANMF payload
+        size_t sub_offset = 16;
+        std::optional<WebPChunk> frame_vp8l;
+        std::optional<WebPChunk> frame_vp8;
+        std::optional<WebPChunk> frame_alph;
+
+        while (sub_offset + 8 <= payload.size()) {
+            uint32_t sub_fourcc = read_u32_le(payload.data() + sub_offset);
+            uint32_t sub_len = read_u32_le(payload.data() + sub_offset + 4);
+            sub_offset += 8;
+
+            size_t sub_avail = (sub_offset <= payload.size()) ? (payload.size() - sub_offset) : 0;
+            size_t sub_payload_len = std::min(static_cast<size_t>(sub_len), sub_avail);
+            std::span<const uint8_t> sub_payload(payload.data() + sub_offset, sub_payload_len);
+            WebPChunk sub_chunk{sub_fourcc, sub_payload};
+
+            if (sub_fourcc == CHUNK_VP8L) {
+                frame_vp8l = sub_chunk;
+            } else if (sub_fourcc == CHUNK_VP8) {
+                frame_vp8 = sub_chunk;
+            } else if (sub_fourcc == CHUNK_ALPH) {
+                frame_alph = sub_chunk;
+            }
+
+            sub_offset += sub_len + (sub_len & 1);
+        }
+
+        ImageResult<Pixmap> sub_res = ImageResult<Pixmap>::fail(ImageError::UnsupportedFormat);
+        if (frame_vp8l.has_value()) {
+            sub_res = decode_vp8l_internal(frame_vp8l->payload);
+        } else if (frame_vp8.has_value()) {
+            std::span<const uint8_t> alph_data;
+            if (frame_alph.has_value()) {
+                alph_data = frame_alph->payload;
+            }
+            sub_res = decode_vp8_internal(frame_vp8->payload, alph_data);
+        }
+
+        if (!sub_res.has_value()) continue;
+        const Pixmap& sub_pixmap = *sub_res;
+
+        // 1. Handle previous frame's disposal
+        if (prev_dispose_bg) {
+            for (uint32_t py = 0; py < prev_h && (prev_y + py) < canvas_h; ++py) {
+                for (uint32_t px = 0; px < prev_w && (prev_x + px) < canvas_w; ++px) {
+                    canvas_pixels[(prev_y + py) * canvas_w + (prev_x + px)] = bg_color;
+                }
+            }
+        }
+
+        // 2. Composite sub-pixmap onto canvas
+        const PremultipliedColorU8* sub_pixels = sub_pixmap.pixels();
+        for (uint32_t py = 0; py < frame_h && py < sub_pixmap.height() && (frame_y + py) < canvas_h; ++py) {
+            for (uint32_t px = 0; px < frame_w && px < sub_pixmap.width() && (frame_x + px) < canvas_w; ++px) {
+                size_t dst_idx = (frame_y + py) * canvas_w + (frame_x + px);
+                PremultipliedColorU8 src = sub_pixels[py * sub_pixmap.width() + px];
+
+                if (no_blend || src.a == 255) {
+                    canvas_pixels[dst_idx] = src;
+                } else if (src.a == 0) {
+                    // Transparent: leave dst unchanged
+                } else {
+                    PremultipliedColorU8 dst = canvas_pixels[dst_idx];
+                    uint16_t inv_a = 255 - src.a;
+                    uint8_t r = static_cast<uint8_t>(src.r + ((static_cast<uint16_t>(dst.r) * inv_a + 127) / 255));
+                    uint8_t g = static_cast<uint8_t>(src.g + ((static_cast<uint16_t>(dst.g) * inv_a + 127) / 255));
+                    uint8_t b = static_cast<uint8_t>(src.b + ((static_cast<uint16_t>(dst.b) * inv_a + 127) / 255));
+                    uint8_t a = static_cast<uint8_t>(src.a + ((static_cast<uint16_t>(dst.a) * inv_a + 127) / 255));
+                    canvas_pixels[dst_idx] = PremultipliedColorU8::from_rgba_unchecked(r, g, b, a);
+                }
+            }
+        }
+
+        // 3. Snapshot composited canvas for this frame
+        WebPAnimationFrame anim_frame;
+        anim_frame.pixmap = canvas;
+        anim_frame.duration_ms = duration;
+        anim_frame.x = frame_x;
+        anim_frame.y = frame_y;
+        anim_frame.width = frame_w;
+        anim_frame.height = frame_h;
+        anim_frame.blend_method = no_blend ? WebPBlendMethod::Overwrite : WebPBlendMethod::AlphaBlend;
+        anim_frame.dispose_method = dispose_bg ? WebPDisposeMethod::Background : WebPDisposeMethod::None;
+        anim.frames.push_back(std::move(anim_frame));
+
+        // 4. Update previous frame disposal state
+        prev_x = frame_x;
+        prev_y = frame_y;
+        prev_w = frame_w;
+        prev_h = frame_h;
+        prev_dispose_bg = dispose_bg;
+    }
+
+    if (anim.frames.empty()) {
+        return ImageResult<WebPAnimation>::fail(ImageError::UnsupportedFormat);
+    }
+
+    return ImageResult<WebPAnimation>::success(std::move(anim));
+}
 
 ImageResult<Pixmap> decode_webp(std::span<const uint8_t> webp_data) {
     auto cont_res = parse_webp_container(webp_data);
@@ -864,6 +869,14 @@ ImageResult<Pixmap> decode_webp(std::span<const uint8_t> webp_data) {
     }
 
     const auto& container = *cont_res;
+
+    // 0. Animated WebP: decode and return the first composited frame
+    if (container.has_animation && !container.anmf_chunks.empty()) {
+        auto anim_res = decode_webp_animation(webp_data);
+        if (anim_res.has_value() && !anim_res->frames.empty()) {
+            return ImageResult<Pixmap>::success(std::move(anim_res->frames[0].pixmap));
+        }
+    }
 
     // 1. Lossless WebP (VP8L)
     if (container.vp8l_chunk.has_value()) {
@@ -893,6 +906,14 @@ ImageResult<ImageInfo> probe_webp(std::span<const uint8_t> webp_data) {
     info.format = ImageFormat::WebP;
     info.bit_depth = 8;
     info.color_model = ColorModel::RGBA;
+
+    if (container.has_animation && !container.anmf_chunks.empty() && container.canvas_width > 0 && container.canvas_height > 0) {
+        info.width = container.canvas_width;
+        info.height = container.canvas_height;
+        info.has_alpha = container.has_alpha;
+        info.channels = info.has_alpha ? 4 : 3;
+        return ImageResult<ImageInfo>::success(info);
+    }
 
     if (container.canvas_width > 0 && container.canvas_height > 0) {
         info.width = container.canvas_width;
@@ -1134,6 +1155,23 @@ ImageResult<Pixmap> decode_webp_file(const std::string& file_path) {
         return ImageResult<Pixmap>::fail(ImageError::IOError);
     }
     return decode_webp(buffer);
+}
+
+ImageResult<WebPAnimation> decode_webp_animation_file(const std::string& file_path) {
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return ImageResult<WebPAnimation>::fail(ImageError::IOError);
+    }
+    std::streamsize size = file.tellg();
+    if (size <= 0) {
+        return ImageResult<WebPAnimation>::fail(ImageError::CorruptedData);
+    }
+    file.seekg(0, std::ios::beg);
+    std::vector<uint8_t> buffer(static_cast<size_t>(size));
+    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
+        return ImageResult<WebPAnimation>::fail(ImageError::IOError);
+    }
+    return decode_webp_animation(buffer);
 }
 
 bool save_webp_file(

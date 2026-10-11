@@ -304,6 +304,52 @@ void test_webp_real_world_lossless() {
     std::cout << "PASSED (" << img->width() << "x" << img->height() << ")\n";
 }
 
+void test_webp_animation_decoding() {
+    std::cout << "[TEST] Animated WebP decoding (assets/anim_sample.webp)... ";
+    std::string path = "assets/anim_sample.webp";
+    auto anim_res = decode_webp_animation_file(path);
+    if (!anim_res.has_value()) {
+        path = "../assets/anim_sample.webp";
+        anim_res = decode_webp_animation_file(path);
+    }
+    if (!anim_res.has_value()) {
+        std::cout << "SKIPPED (asset not found)\n";
+        return;
+    }
+    const auto& anim = *anim_res;
+
+    assert(anim.canvas_width == 60);
+    assert(anim.canvas_height == 40);
+    assert(anim.frame_count() == 2);
+    assert(anim.loop_count == 3);
+    assert(anim.total_duration_ms() == 300);
+
+    // Frame 0 checks (Red)
+    const auto& f0 = anim.frames[0];
+    assert(f0.duration_ms == 150);
+    assert(f0.pixmap.width() == 60);
+    assert(f0.pixmap.height() == 40);
+    auto p0 = f0.pixmap.pixel(10, 10).value();
+    assert(p0.r == 255 && p0.g == 0 && p0.b == 0 && p0.a == 255);
+
+    // Frame 1 checks (Green)
+    const auto& f1 = anim.frames[1];
+    assert(f1.duration_ms == 150);
+    assert(f1.pixmap.width() == 60);
+    assert(f1.pixmap.height() == 40);
+    auto p1 = f1.pixmap.pixel(10, 10).value();
+    assert(p1.r == 0 && p1.g == 255 && p1.b == 0 && p1.a == 255);
+
+    // Still image decode of animated file should return frame 0
+    auto still = decode_webp_file(path);
+    assert(still.has_value());
+    assert(still->width() == 60 && still->height() == 40);
+    auto ps = still->pixel(10, 10).value();
+    assert(ps.r == 255 && ps.g == 0 && ps.b == 0 && ps.a == 255);
+
+    std::cout << "PASSED (2 frames, 60x40, 300ms total)\n";
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "Nisaba Sovereign WebP Codec Test Suite\n";
@@ -316,9 +362,12 @@ int main() {
     test_webp_arbitrary_dimensions();
     test_webp_vp8x_extended_probe();
     test_webp_real_world_lossless();
+    test_webp_animation_decoding();
 
     std::cout << "========================================\n";
     std::cout << "All WebP Unit Tests PASSED Successfully!\n";
     std::cout << "========================================\n";
     return 0;
 }
+
+

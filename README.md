@@ -14,15 +14,16 @@
 
 **Nisaba** (`nisaba`) is an embedded-first, zero-dependency, ultra-lightweight 2D graphics rendering and layout engine written from scratch in **Modern C++ (C++20)**, featuring multi-backend sovereign rendering (CPU software rasterizer, native **Vulkan** GPU pipeline, and **OpenGL ES 3.2** GPU pipeline), exact geometric path boolean operations (`nisaba::path_ops`), stroke-to-fill path outlining (`nisaba::stroker`), multi-format embedded framebuffers (RGB565, Alpha8, Gray8, BGRA8888, RGBA8888), physical linear-space sRGB color blending, a deterministic 7-stage Flexible Box and UI layout engine (`nisaba-layout`), complete sovereign image codec subsystems, a sovereign Lottie vector animation engine (`nisaba::lottie`), an optional sovereign native OS platform and windowing subsystem (`backend_os`), a sovereign Markdown document layout and multi-page rendering engine (`nisaba::markdown`), and a full-specification sovereign PDF document engine (`nisaba::pdf`). Purpose-built as the native rendering foundation for the **`vaxp`** cross-platform organization.
 
-Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union, Difference, Intersect, Xor), high-precision 256-level subpixel anti-aliasing, hardware 4x MSAA, analytical SDF Gaussian shadows, screen-space dithering, two-point conical & compose multi-shaders, 4x5 affine color matrix filtering, Porter-Duff compositing, full W3C SVG vector graphics with gradients and masks, real-time Bodymovin/Lottie vector animations, a sovereign multilingual typography subsystem with native TrueType and PostScript CFF/OpenType layout, zero-dependency PNG/JPEG/QOI image codecs, a sovereign CommonMark/GFM Markdown engine, a full-specification ISO 32000 PDF document engine, an adaptive flexbox and stack layout solver, and a sovereign cross-platform OS windowing layer with **absolute technological sovereignty** (zero external third-party dependencies, 100% free of GLFW/SDL).
+Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union, Difference, Intersect, Xor), high-precision 256-level subpixel anti-aliasing, hardware 4x MSAA, analytical SDF Gaussian shadows, screen-space dithering, two-point conical & compose multi-shaders, 4x5 affine color matrix filtering, Porter-Duff compositing, full W3C SVG vector graphics with gradients and masks, real-time Bodymovin/Lottie vector animations, a sovereign multilingual typography subsystem with native TrueType and PostScript CFF/OpenType layout, zero-dependency PNG/JPEG/WebP/QOI image codecs, a sovereign CommonMark/GFM Markdown engine, a full-specification ISO 32000 PDF document engine, an adaptive flexbox and stack layout solver, and a sovereign cross-platform OS windowing layer with **absolute technological sovereignty** (zero external third-party dependencies, 100% free of GLFW/SDL).
 
 
 ---
 
 ## Visual Showcases
 
-### Sovereign PNG & JPEG Image Codecs Showcase (VAXP Logo Integration)
-![Nisaba Image Codecs Showcase](showcase/nisaba_image_codec_showcase.png)
+### Sovereign Image Codecs Showcase — PNG, JPEG, WebP & QOI (VAXP Logo Integration)
+![Nisaba Image Codecs Showcase](showcase/showcase_vaxp.png)
+
 
 ### Vector & Shader Rendering Showcase
 ![Nisaba Vector Showcase](showcase/embedded_hmi_showcase.png)
@@ -47,6 +48,9 @@ Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union,
 
 ### Hardware-Accelerated GPU Rendering Showcase (Vulkan & OpenGL ES 3.2 with 4x MSAA)
 ![Nisaba GPU Showcase](showcase/example_calculator.png)
+
+### Hardware-Accelerated GPU Backdrop Blur & Frosted Glass Showcase (`DualKawaseBlur`)
+![Nisaba GPU Blur Showcase](showcase/glass_gpu_blur_verified.png)
 
 ### Sovereign Lottie Vector Animation Engine Showcase (`nisaba::lottie` & Hardware GPU Acceleration)
 ![Nisaba Lottie GPU Showcase](showcase/nisaba_lottie_gpu_showcase.png)
@@ -176,20 +180,46 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Headless EGL & OpenGL ES 3.2 Driver Interface (`GLDevice`, `GLSurface`, `GL3Renderer`)**:
   - Direct, zero-dependency binding to GPU hardware drivers via headless EGL, enabling high-performance hardware rendering and headless offscreen compute across Linux, Android, DRM/KMS, and desktop displays.
 - **4x Hardware Multi-Sample Anti-Aliasing (MSAA)**: Native multisampled color and depth/stencil renderbuffers/attachments with automated blit resolve to single-sample surfaces during frame readback, guaranteeing smooth antialiased vector geometry.
+- **Hardware GPU Backdrop Blur & Dual-Kawase Hierarchical Blur Engine (`GpuCanvas::draw_backdrop_blur`, `nisaba::gpu::DualKawaseBlur`)**:
+  - Real-time sovereign Dual-Kawase hierarchical FBO pyramid blur engine with zero dynamic heap allocation per frame.
+  - 5-tap downsampling pre-filter with hardware bilinear texture filtering:
+    $$\text{FragColor} = 0.125 \times (4 \times T(uv) + T(uv - d) + T(uv + d) + T(uv + (d_x, -d_y)) + T(uv + (-d_x, d_y)))$$
+  - 8-tap upsampling tent reconstruction filter eliminating boxiness and high-frequency edge sparkling:
+    $$\text{FragColor} = \frac{1}{12} \times \left(\sum \text{corners} + 2 \times \sum \text{edges}\right)$$
+  - Core Profile VAO + Fullscreen Triangle VBO rasterization.
+  - Automated vector framebuffer synchronization ensuring all background vector primitives are rasterized prior to texture capture (`glCopyTexSubImage2D`).
+  - High-level primitives: `GpuCanvas::draw_backdrop_blur(Rect, BorderRadius, sigma)` and `GpuCanvas::draw_backdrop_blur(RRect, sigma)` powering frosted glass cards, blurred dialogs, and translucent panels at sustained **120+ FPS**.
+- **GPU Vector Path & Shape Clipping via Dual-Nibble Stencil Buffer (`GpuCanvas::clip_path`, `GpuCanvas::clip_rrect`)**:
+  - Dedicated `GL_DEPTH24_STENCIL8` renderbuffer attachment on both resolve and 4x MSAA framebuffers.
+  - Dual-nibble stencil state encoding:
+    - **Bits 4..7 (Upper Nibble)**: Encodes active clip depth level supporting up to 15 nested clipping scopes ($C_1 \cap C_2 \dots$).
+    - **Bits 0..3 (Lower Nibble)**: Transient scratch space for winding-number (`GL_INCR_WRAP`/`GL_DECR_WRAP`) and even-odd (`GL_INVERT`) polygon accumulation.
+  - Two-pass stencil tessellation & cover quad pipeline (`GL3Renderer::renderClip` / `restoreClip`):
+    - Pass 1: Disables color writes and evaluates path geometry into scratch bits 0..3 matching previous depth.
+    - Pass 2: Screen/bounding-box cover quad testing `(stencil & 0x0f) != 0` replacing passing fragments with `targetDepth << 4` (clearing scratch bits back to 0) via `GL_REPLACE`.
+  - Full state stack preservation across `GpuCanvas::save()` / `restore()` with automatic `stencil_clip_depth` unwinding.
+  - Mask-safe buffer clearing with `GpuDevice::clear` resetting write masks (`glColorMask`, `glDepthMask`, `glStencilMask(0xff)`).
+- **Hardware-Accelerated Asymmetric 4-Corner Rounded Rectangles (`BorderRadius` & `RRect` Fast-Path)**:
+  - Direct zero-tessellation analytical GPU quad fast-path via `ShaderRRect` and `roundedRectVarying` shader pipeline.
+  - Complete W3C CSS Backgrounds & Borders Level 3 proportional constraint scaling ($f = \min(1.0, \dots)$) guaranteeing zero overlapping corner distortion on arbitrary dimensions.
+  - Native GPU primitives: `GpuCanvas::fill_rrect(const RRect&, const Paint&)`, `stroke_rrect(const RRect&, const Paint&)`, and `clip_rrect(const RRect&)`.
+  - Analytical GPU drop shadows `GpuCanvas::draw_rrect_shadow(const RRect&, const effects::DropShadow&)` and translucent frosted glass cards `GpuCanvas::draw_glass_panel(const RRect&, const effects::GlassPanelParams&)`.
 - **Triangular Screen-Space Dithering (Anti-Banding)**: High-precision temporal-stable triangular probability density function (TPDF) dither embedded directly into linear, radial, and angular sweep gradient shaders (both GLSL and SPIR-V), eradicating color banding artifacts.
 - **Analytical Signed Distance Field (SDF) Gaussian Shadows & Neon Halos**: Closed-form mathematical evaluation of the 2D Gaussian convolution integral via the error function ($\text{erf}$), generating soft ambient drop shadows and vibrant glowing halos in a single GPU draw call.
-- **Real-Time Glassmorphism & Translucent Panels (`GpuCanvas::draw_glass_panel`)**: Modern frosted glass UI surfaces incorporating analytical elevation drop shadows, tinted translucent bodies, and specular edge reflection borders.
+- **Real-Time Glassmorphism & Translucent Panels (`GpuCanvas::draw_glass_panel`)**: Modern frosted glass UI surfaces incorporating analytical elevation drop shadows, tinted translucent bodies, specular edge reflection borders, and hardware backdrop blur.
 - **Direct W3C SVG Vector Graphics on GPU (`GpuCanvas::draw_svg`)**: Native execution and GPU rasterization of arbitrary W3C SVG paths and icons with hardware MSAA and zero external dependencies.
 - **Hardware GPU Text Rendering & Dynamic Glyph Atlas (`GpuCanvas::draw_text`, `GpuCanvas::draw_text_buffer`, `GpuGlyphAtlas`)**:
   - Full-specification hardware typography on GPU via dynamic Skyline 2D bin-packed alpha atlases ($1024 \times 1024$ dynamically expandable on-demand up to $2048 \times 2048$).
-  - 1-pixel boundary padding eliminating texture bleeding, 4-bin subpixel horizontal positioning, and minimal dirty-region partial GPU texture flushes.
+  - 1-pixel boundary padding eliminating texture bleeding, 4-bin subpixel horizontal positioning, and minimal dirty-region partial GPU texture flushes (`flushToGpu`).
   - Unified single-batch draw calls (`GpuCanvas::draw_text_buffer`) batching full shaped paragraphs and multi-line text layouts into a single GPU draw call with per-vertex color tinting (`Vertex::color`) for multicolored text spans and syntax highlighting.
+  - Benchmarked at **4.83x faster CPU Command Submission** and **1.12x faster overall frame throughput** in `gpu_micro_profiler`.
 - **Ultra-Low CPU Command Overhead & Sustained High Frame Rates**:
   - Highly optimized GPU command recording and state caching delivering near-zero CPU submission overhead and sustained 120+ FPS throughput across complex vector scenes.
 - **Continuous Ribbon Stroking & High-Density Tessellation**: Adaptive curved geometry tessellation with averaged vertex miter normals for continuous, break-free ribbons and strokes at arbitrary angles.
-- **Seamless Dual CPU/GPU Coexistence**: Complete architectural isolation ensuring 0 regressions on CPU rasterization while sharing mathematical types (`Rect`, `Point`, `Color`, `Path`, `Transform`) and textures (`Pixmap`).
+- **Seamless Dual CPU/GPU Coexistence**: Complete architectural isolation ensuring 0 regressions on CPU rasterization while sharing mathematical types (`Rect`, `Point`, `Color`, `Path`, `Transform`, `RRect`, `BorderRadius`) and textures (`Pixmap`).
 
-### 11. Sovereign PNG & JPEG Image Codecs Subsystem (`nisaba::image`)
+
+### 11. Sovereign Image Codecs Subsystem — PNG, JPEG, WebP & QOI (`nisaba::image`)
 - **Zero-Dependency Deflate Compression Subsystem (`nisaba::image::deflate`)**:
   - Full RFC 1950 (Zlib wrapper) and RFC 1951 (Deflate stream) compliance.
   - Compile-time `constexpr` 256-entry CRC-32 (ISO 3309) and loop-unrolled Adler-32 accumulators.
@@ -217,16 +247,31 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Component count ($1 \dots 4$) and sampling factor ($H, V \le 4$) validation preventing infinite loops.
   - Zero-division protection against empty or malformed quantization tables.
   - Safe progressive JPEG (`SOF2`) handshake returning clean error codes without process crashes.
+- **Sovereign WebP Subsystem (`nisaba::image::webp`)**:
+  - Full standard RIFF/WEBP container chunk parser and generator supporting `VP8L`, `VP8X`, `ANIM`, `ANMF`, `ALPH`, `ICCP`, `EXIF`, and `XMP` chunks with zero third-party dependencies (100% free of `libwebp`).
+  - **Sovereign Lossless WebP (VP8L)**:
+    - Pure Modern C++20 VP8L decoder and encoder.
+    - Full decoding of spatial prediction transforms, color transforms, subtract green transforms, and color indexing (palette) transforms.
+    - Bitwise canonical Huffman stream decoder and high-efficiency lossless bitstream compressor.
+  - **Sovereign Animated WebP Engine (`WebPAnimation`, `WebPAnimationFrame`)**:
+    - Multi-frame timeline parser evaluating sequence timing (`duration_ms`), sub-rectangle offsets $(x, y)$, and dimensions $(w, h)$ across sequential `ANMF` chunks.
+    - Full canvas frame compositing engine supporting alpha blending (`WebPBlendMethod::AlphaBlend`) and overwrite (`WebPBlendMethod::Overwrite`).
+    - Frame disposal handling: background clearing (`WebPDisposeMethod::Background`) and canvas preservation (`WebPDisposeMethod::None`).
+    - Dedicated APIs: `decode_webp_animation`, `decode_webp_animation_file`, `is_animated_webp`, with automatic fallback to the first composited frame in still image decoders (`decode_webp`).
+  - **Non-Destructive Header Probing**:
+    - Direct $O(1)$ header inspection (`probe_webp`, `probe_image_file`) querying canvas width, height, alpha channel presence, and bit depth without decompressing image pixel payloads.
+  - **Direct `Pixmap` Integration**:
+    - Seamless loading and saving via `Pixmap::load_webp(path)`, `pixmap.save_webp(path)`, and automatic sniffing of `RIFF....WEBP` magic bytes in `Pixmap::load_file()`.
 - **Sovereign QOI Subsystem (`nisaba::image::qoi`)**:
   - Full Quite OK Image Format specification implementation in pure C++20.
   - All 6 core operations supported: `QOI_OP_RUN`, `QOI_OP_INDEX` (64-entry running color cache), `QOI_OP_DIFF`, `QOI_OP_LUMA`, `QOI_OP_RGB`, `QOI_OP_RGBA`.
   - Ultra-fast lossless performance: encodes in **~7.9 ms** and decodes in **~7.4 ms** on 1400x900 HD surfaces (**12.8x faster than PNG**).
   - Direct integration into `Pixmap::load_qoi()`, `pixmap.save_qoi()`, and auto-detection via `qoif` magic bytes.
 - **Unified I/O & `Pixmap` Auto-Sniffing (`nisaba::image::image_io`)**:
-  - `Pixmap::load_file(path)`: automatic magic-byte sniffing (PNG, JPEG, QOI, BMP, PPM).
+  - `Pixmap::load_file(path)`: automatic magic-byte sniffing (PNG, JPEG, WebP, QOI, BMP, PPM).
   - `Pixmap::load_from_memory(data)`: in-memory decoding.
-  - `pixmap.save_png(path, level)`, `pixmap.save_jpeg(path, quality)`, and `pixmap.save_qoi(path)`.
-  - `pixmap.save_image(path)`: auto-format detection by file extension (.png, .jpg, .jpeg, .qoi, .bmp, .ppm).
+  - `pixmap.save_png(path, level)`, `pixmap.save_jpeg(path, quality)`, `pixmap.save_webp(path)`, and `pixmap.save_qoi(path)`.
+  - `pixmap.save_image(path)`: auto-format detection by file extension (.png, .jpg, .jpeg, .webp, .qoi, .bmp, .ppm).
 
 ### 12. Sovereign Adaptive Flexbox & UI Layout Engine (`nisaba-layout` / `nisaba::layout`)
 - **Deterministic 7-Stage Layout Pipeline (`LayoutPipeline`)**:
