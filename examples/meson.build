@@ -70,6 +70,12 @@ if get_option('enable_gpu')
       dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
     )
 
+    showcase_gpu_blur_exe = executable('showcase_gpu_blur',
+      'showcase_gpu_blur.cpp',
+      cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
+      dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
+    )
+
     example_damage_comparison_exe = executable('example_damage_comparison',
       'example_damage_comparison.cpp',
       cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],

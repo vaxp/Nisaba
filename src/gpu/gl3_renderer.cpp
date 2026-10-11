@@ -500,7 +500,7 @@ struct GL3Renderer::Impl {
 			}
 			float invExtX = (frag->extent[0] > 1e-4f) ? (1.0f / frag->extent[0]) : 1.0f;
 			float invExtY = (frag->extent[1] > 1e-4f) ? (1.0f / frag->extent[1]) : 1.0f;
-			Transform2D uvXform = Transform2D::scale(invExtX, invExtY).multiply(invxform);
+			Transform2D uvXform = invxform.multiply(Transform2D::scale(invExtX, invExtY));
 			xformToMat3x4(frag->paintMat, uvXform);
 		} else if (paint.extent[0] == 0.0f && paint.extent[1] == 0.0f && paint.radius == 0.0f &&
 		           paint.innerColor.r == paint.outerColor.r &&
@@ -518,7 +518,7 @@ struct GL3Renderer::Impl {
 			frag->feather = paint.feather;
 			paint.xform.inverse(invxform);
 			float invFeather = (paint.feather > 1e-4f) ? (1.0f / paint.feather) : 1.0f;
-			Transform2D gradXform = Transform2D::scale(1.0f, invFeather).multiply(invxform);
+			Transform2D gradXform = invxform.multiply(Transform2D::scale(1.0f, invFeather));
 			xformToMat3x4(frag->paintMat, gradXform);
 		} else if (paint.radius > 0.0f && paint.extent[0] == paint.radius && paint.extent[1] == paint.radius) {
 			frag->type = ShaderRadialGrad;

@@ -105,6 +105,7 @@ if get_option('enable_gpu')
     'src/gpu/gpu_surface.cpp',
     'src/gpu/gpu_tessellator.cpp',
     'src/gpu/gpu_canvas.cpp',
+    'src/gpu/gpu_blur.cpp',
   )
   if get_option('enable_vulkan') and vulkan_dep.found()
     add_project_arguments('-DNISABA_HAS_VULKAN=1', language: ['c', 'cpp'])

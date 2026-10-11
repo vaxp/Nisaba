@@ -1,10 +1,12 @@
 #include "nisaba/gpu/gpu_canvas.hpp"
 #include "nisaba/gpu/gl3_renderer.hpp"
+#include "nisaba/gpu/gpu_blur.hpp"
 #include "nisaba/path/path_builder.hpp"
 #include <GL/glew.h>
 #include <GL/gl.h>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace nisaba::gpu {
 
@@ -36,6 +38,7 @@ void GpuCanvas::ensure_frame() {
 }
 
 void GpuCanvas::clear(nisaba::Color color) {
+    invalidate_backdrop_cache();
     if (context_ && in_frame_) {
         context_->cancelFrame();
         in_frame_ = false;
@@ -522,6 +525,98 @@ void GpuCanvas::draw_glow(const nisaba::Rect& rect, float rx, float ry, nisaba::
     draw_round_rect_shadow(rect, rx, ry, shadow);
 }
 
+void GpuCanvas::invalidate_backdrop_cache() noexcept {
+    backdrop_cache_.valid = false;
+    backdrop_cache_.texture_id = 0;
+    backdrop_cache_.img_handle = 0;
+    backdrop_cache_.sigma = 0.0f;
+}
+
+void GpuCanvas::draw_backdrop_blur(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, float sigma) {
+    if (!context_ || !surface_ || sigma <= 0.0f || rect.width() <= 0.0f || rect.height() <= 0.0f) return;
+
+    int blur_img = 0;
+    if (backdrop_cache_.valid && backdrop_cache_.img_handle > 0) {
+        // High-Performance Glass Optimization:
+        // Reuse cached blurred backdrop texture for all sibling glass panels in the active frame
+        blur_img = backdrop_cache_.img_handle;
+    } else {
+        // 1. Flush all pending background primitives to the active GPU framebuffer
+        if (in_frame_) {
+            context_->endFrame();
+            in_frame_ = false;
+        }
+
+        // 2. Resolve surface if MSAA is enabled
+        if (surface_->samples() > 1) {
+            surface_->resolve();
+        }
+
+        if (!blur_engine_) {
+            blur_engine_ = std::make_unique<DualKawaseBlur>();
+        }
+
+        DualKawaseConfig cfg;
+        cfg.passes = std::clamp(static_cast<int>(std::ceil(sigma / 6.0f)), 1, 5);
+        cfg.radius = std::max(1.5f, sigma / 4.0f);
+
+        uint32_t src_fbo = (surface_->samples() > 1) ? surface_->resolve_fbo() : surface_->fbo_id();
+        uint32_t blurred_tex = blur_engine_->blur_framebuffer(
+            src_fbo,
+            static_cast<int>(surface_->width()),
+            static_cast<int>(surface_->height()),
+            cfg
+        );
+
+        if (blurred_tex != 0) {
+            blur_img = context_->renderer()->createTextureFromNativeHandle(
+                blurred_tex,
+                static_cast<int>(surface_->width()),
+                static_cast<int>(surface_->height()),
+                ImageFlags::ImageFlipY
+            );
+
+            if (blur_img > 0) {
+                temp_images_.push_back(blur_img);
+                backdrop_cache_.valid = true;
+                backdrop_cache_.texture_id = blurred_tex;
+                backdrop_cache_.img_handle = blur_img;
+                backdrop_cache_.sigma = sigma;
+            }
+        }
+    }
+
+    // 3. Resume frame for drawing the blurred glass panel
+    ensure_frame();
+
+    if (blur_img > 0) {
+        auto pattern = context_->imagePattern(
+            0.0f, 0.0f,
+            static_cast<float>(surface_->width()),
+            static_cast<float>(surface_->height()),
+            0.0f, blur_img, 1.0f
+        );
+
+        BorderRadius cr = radii.constrained_for_size(rect.width(), rect.height());
+        context_->beginPath();
+        context_->roundedRectVarying(
+            rect.x(), rect.y(), rect.width(), rect.height(),
+            cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left
+        );
+        context_->fillPaint(pattern);
+        context_->fill();
+    }
+}
+
+void GpuCanvas::draw_backdrop_blur(const nisaba::Rect& rect, float sigmaX, float sigmaY) {
+    float sigma = (sigmaY > 0.0f) ? std::max(sigmaX, sigmaY) : sigmaX;
+    draw_backdrop_blur(rect, BorderRadius::all(0.0f), sigma);
+}
+
+void GpuCanvas::draw_backdrop_blur(const nisaba::RRect& rrect, float sigma) {
+    draw_backdrop_blur(rrect.rect, rrect.radii, sigma);
+}
+
 void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::GlassParams& params) {
     if (!context_) return;
     ensure_frame();
@@ -533,14 +628,21 @@ void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, const nisaba::BorderR
         draw_rrect_shadow(rect, cr, *params.shadow);
     }
 
-    // 2. Glass tinted background
-    context_->beginPath();
-    context_->roundedRectVarying(rect.x(), rect.y(), rect.width(), rect.height(),
-                                 cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
-    context_->fillColor(params.tint_color);
-    context_->fill();
+    // 2. Hardware GPU Backdrop Blur if blur_sigma > 0
+    if (params.blur_sigma > 0.0f) {
+        draw_backdrop_blur(rect, cr, params.blur_sigma);
+    }
 
-    // 3. Crisp specular border stroke
+    // 3. Glass tinted background
+    if (params.tint_color.alpha() > 0.0f) {
+        context_->beginPath();
+        context_->roundedRectVarying(rect.x(), rect.y(), rect.width(), rect.height(),
+                                     cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+        context_->fillColor(params.tint_color);
+        context_->fill();
+    }
+
+    // 4. Crisp specular border stroke
     if (params.border_width > 0.0f && params.border_color.alpha() > 0.0f) {
         if (auto path = PathBuilder::from_rounded_rect(rect, cr)) {
             stroke_path(*path, nisaba::Paint(params.border_color), Stroke(params.border_width));
@@ -606,6 +708,7 @@ void GpuCanvas::draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_b
 }
 
 void GpuCanvas::flush() {
+    invalidate_backdrop_cache();
     if (context_ && in_frame_) {
         context_->endFrame();
         in_frame_ = false;
@@ -622,6 +725,7 @@ void GpuCanvas::flush() {
 }
 
 void GpuCanvas::flush(const ScreenIntRect& damage_rect) {
+    invalidate_backdrop_cache();
     if (context_ && in_frame_) {
         context_->endFrame();
         in_frame_ = false;
@@ -638,6 +742,7 @@ void GpuCanvas::flush(const ScreenIntRect& damage_rect) {
 }
 
 void GpuCanvas::flush(const std::vector<ScreenIntRect>& damage_rects) {
+    invalidate_backdrop_cache();
     if (context_ && in_frame_) {
         context_->endFrame();
         in_frame_ = false;

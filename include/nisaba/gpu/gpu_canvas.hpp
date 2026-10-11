@@ -104,6 +104,12 @@ public:
     void draw_glass_panel(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, const effects::GlassParams& params);
     void draw_glass_panel(const nisaba::RRect& rrect, const effects::GlassParams& params);
 
+    // --- Hardware GPU Backdrop Blur ---
+    void draw_backdrop_blur(const nisaba::Rect& rect, float sigmaX, float sigmaY = 0.0f);
+    void draw_backdrop_blur(const nisaba::Rect& rect, const nisaba::BorderRadius& radii, float sigma);
+    void draw_backdrop_blur(const nisaba::RRect& rrect, float sigma);
+    void invalidate_backdrop_cache() noexcept;
+
     // --- SVG Vector Graphics ---
     void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds);
 
@@ -133,6 +139,14 @@ private:
     int current_stencil_depth_{0};
     std::vector<GpuCanvasState> state_stack_{};
     std::vector<int> temp_images_{};
+    std::unique_ptr<class DualKawaseBlur> blur_engine_{nullptr};
+
+    struct BackdropCache {
+        uint32_t texture_id{0};
+        int img_handle{0};
+        float sigma{0.0f};
+        bool valid{false};
+    } backdrop_cache_{};
 
     void apply_fill_paint(const nisaba::Paint& paint);
     void apply_stroke(const nisaba::Stroke& stroke, const nisaba::Paint& paint);

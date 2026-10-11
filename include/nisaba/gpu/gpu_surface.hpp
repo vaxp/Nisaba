@@ -38,6 +38,7 @@ public:
     [[nodiscard]] uint32_t width() const noexcept { return width_; }
     [[nodiscard]] uint32_t height() const noexcept { return height_; }
     [[nodiscard]] uint32_t fbo_id() const noexcept { return fbo_id_; }
+    [[nodiscard]] uint32_t resolve_fbo() const noexcept { return resolve_fbo_; }
     [[nodiscard]] uint32_t samples() const noexcept { return samples_; }
     [[nodiscard]] std::shared_ptr<GpuTexture> texture();
     [[nodiscard]] std::shared_ptr<GpuDevice> device() const noexcept { return device_; }

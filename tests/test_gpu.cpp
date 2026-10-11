@@ -607,6 +607,67 @@ void test_gpu_clip_path() {
     std::cout << "  -> GPU vector path clipping OK (Circle, Nested Intersections, Mixed Scissor+Path)" << std::endl;
 }
 
+void test_gpu_backdrop_blur() {
+    std::cout << "Testing GPU hardware backdrop blur (Dual-Kawase)..." << std::endl;
+
+    auto device = GpuDevice::create();
+    assert(device != nullptr);
+
+    constexpr uint32_t W = 400;
+    constexpr uint32_t H = 300;
+
+    auto surface = GpuSurface::create(device, W, H, 1);
+    assert(surface != nullptr);
+
+    GpuCanvas canvas(surface);
+
+    // 1. Draw split high-contrast backdrop: Left pure RED, Right pure BLUE
+    canvas.fill_rect(*Rect::from_xywh(0.0f, 0.0f, 200.0f, 300.0f), Paint(RED));
+    canvas.fill_rect(*Rect::from_xywh(200.0f, 0.0f, 200.0f, 300.0f), Paint(BLUE));
+    canvas.flush();
+
+    // 2. Draw frosted glass panel in the center crossing the seam (x=100 to 300)
+    effects::GlassParams params;
+    params.blur_sigma = 18.0f;
+    params.tint_color = Color::from_rgba8(255, 255, 255, 30);
+    params.border_width = 1.5f;
+    params.border_color = Color::from_rgba8(255, 255, 255, 100);
+
+    auto card_rect = *Rect::from_xywh(100.0f, 50.0f, 200.0f, 200.0f);
+    BorderRadius card_radii = BorderRadius::all(20.0f);
+
+    canvas.draw_glass_panel(card_rect, card_radii, params);
+    canvas.flush();
+
+    auto readback = surface->to_pixmap();
+    assert(readback.has_value());
+
+    // 3. Verify seam pixel inside blurred card: Red and Blue must have diffused into each other!
+    auto seam_px = readback->as_ref().pixel(200, 150);
+    assert(seam_px.has_value());
+    assert(seam_px->r > 30);
+    assert(seam_px->b > 30);
+
+    // 4. Verify outside regions remain 100% sharp and unblurred
+    auto outside_red = readback->as_ref().pixel(50, 150);
+    assert(outside_red.has_value());
+    assert(outside_red->r > 200);
+    assert(outside_red->b < 30);
+
+    auto outside_blue = readback->as_ref().pixel(350, 150);
+    assert(outside_blue.has_value());
+    assert(outside_blue->b > 200);
+    assert(outside_blue->r < 30);
+
+    // 5. Test direct draw_backdrop_blur API with asymmetric RRect
+    BorderRadius asym_radii(10.0f, 30.0f, 5.0f, 20.0f);
+    RRect asym_rrect(*Rect::from_xywh(50.0f, 20.0f, 120.0f, 80.0f), asym_radii);
+    canvas.draw_backdrop_blur(asym_rrect, 10.0f);
+    canvas.flush();
+
+    std::cout << "  -> Hardware GPU Dual-Kawase Backdrop Blur OK (Seam blending verified, sharpness preserved)" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running Nisaba GPU Rendering Pipeline Test Suite" << std::endl;
@@ -625,9 +686,10 @@ int main() {
     test_gpu_text_rendering();
     test_gpu_text_buffer_rendering();
     test_gpu_clip_path();
+    test_gpu_backdrop_blur();
 
     std::cout << "========================================" << std::endl;
-    std::cout << "All Nisaba GPU pipeline tests PASSED (13/13)!" << std::endl;
+    std::cout << "All Nisaba GPU pipeline tests PASSED (14/14)!" << std::endl;
     std::cout << "========================================" << std::endl;
 
     return 0;
