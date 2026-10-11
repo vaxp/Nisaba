@@ -217,6 +217,13 @@ bool PixmapRef::save_qoi(const std::string& path, bool linear_colorspace) const 
     return image::save_qoi_file(*this, path, linear_colorspace);
 }
 
+bool PixmapRef::save_webp(const std::string& path, bool lossless, int quality) const {
+    if (format_ != PixelFormat::RGBA8888) {
+        return to_rgba8888().save_webp(path, lossless, quality);
+    }
+    return image::save_webp_file(*this, path, lossless, quality);
+}
+
 bool PixmapRef::save_image(const std::string& path) const {
     if (format_ != PixelFormat::RGBA8888) {
         return to_rgba8888().save_image(path);
@@ -400,6 +407,12 @@ std::optional<Pixmap> Pixmap::load_jpeg(const std::string& path) {
 
 std::optional<Pixmap> Pixmap::load_qoi(const std::string& path) {
     auto res = image::decode_qoi_file(path);
+    if (!res) return std::nullopt;
+    return std::move(*res);
+}
+
+std::optional<Pixmap> Pixmap::load_webp(const std::string& path) {
+    auto res = image::decode_webp_file(path);
     if (!res) return std::nullopt;
     return std::move(*res);
 }

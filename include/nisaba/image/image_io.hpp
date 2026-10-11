@@ -9,6 +9,7 @@
 #include "nisaba/image/png.hpp"
 #include "nisaba/image/jpeg.hpp"
 #include "nisaba/image/qoi.hpp"
+#include "nisaba/image/webp.hpp"
 #include "nisaba/canvas/pixmap.hpp"
 
 namespace nisaba::image {

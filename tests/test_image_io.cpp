@@ -40,6 +40,17 @@ void test_format_detection_and_auto_io() {
     assert(loaded_jpg->width() == w);
     assert(loaded_jpg->height() == h);
 
+    // Save as WebP via auto extension
+    std::string webp_path = "/home/x/Desktop/nisaba/showcase/test_unified_auto.webp";
+    bool ok_webp = pixmap.save_image(webp_path);
+    assert(ok_webp);
+
+    // Auto-load WebP without specifying format
+    auto loaded_webp = Pixmap::load_file(webp_path);
+    assert(loaded_webp.has_value());
+    assert(loaded_webp->width() == w);
+    assert(loaded_webp->height() == h);
+
     std::cout << "PASSED\n";
 }
 

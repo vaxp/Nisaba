@@ -63,6 +63,7 @@ nisaba_sources = files(
   'src/image/png.cpp',
   'src/image/jpeg.cpp',
   'src/image/qoi.cpp',
+  'src/image/webp.cpp',
   'src/image/image_io.cpp',
 )
 

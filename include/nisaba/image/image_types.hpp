@@ -17,7 +17,8 @@ enum class ImageFormat {
     JPEG,
     QOI,
     BMP,
-    PPM
+    PPM,
+    WebP
 };
 
 enum class ColorModel {

@@ -64,6 +64,8 @@
 #include "nisaba/image/deflate.hpp"
 #include "nisaba/image/png.hpp"
 #include "nisaba/image/jpeg.hpp"
+#include "nisaba/image/qoi.hpp"
+#include "nisaba/image/webp.hpp"
 #include "nisaba/image/image_io.hpp"
 #include "nisaba/layout/layout.hpp"
 #include "nisaba/animation/animation.hpp"

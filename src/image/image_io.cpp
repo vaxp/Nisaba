@@ -6,6 +6,12 @@
 namespace nisaba::image {
 
 ImageFormat detect_format(std::span<const uint8_t> data) noexcept {
+    if (data.size() >= 12) {
+        if (std::memcmp(data.data(), "RIFF", 4) == 0 &&
+            std::memcmp(data.data() + 8, "WEBP", 4) == 0) {
+            return ImageFormat::WebP;
+        }
+    }
     if (data.size() >= 8) {
         constexpr uint8_t PNG_MAGIC[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
         if (std::memcmp(data.data(), PNG_MAGIC, 8) == 0) {
@@ -41,6 +47,8 @@ ImageResult<Pixmap> load_image_from_memory(std::span<const uint8_t> data) {
             return decode_jpeg(data);
         case ImageFormat::QOI:
             return decode_qoi(data);
+        case ImageFormat::WebP:
+            return decode_webp(data);
         default:
             return ImageResult<Pixmap>::fail(ImageError::UnsupportedFormat);
     }
@@ -75,6 +83,8 @@ ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data) {
             return probe_jpeg(data);
         case ImageFormat::QOI:
             return probe_qoi(data);
+        case ImageFormat::WebP:
+            return probe_webp(data);
         default:
             return ImageResult<ImageInfo>::fail(ImageError::UnsupportedFormat);
     }
@@ -118,6 +128,8 @@ bool save_image_file(
         return save_jpeg_file(pixmap, path, quality_or_compression);
     } else if (ext == "qoi") {
         return save_qoi_file(pixmap, path);
+    } else if (ext == "webp") {
+        return save_webp_file(pixmap, path);
     } else if (ext == "bmp") {
         return pixmap.save_bmp(path);
     } else if (ext == "ppm") {

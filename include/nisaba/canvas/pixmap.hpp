@@ -247,6 +247,7 @@ public:
     bool save_png(const std::string& path, int compression_level = 6) const;
     bool save_jpeg(const std::string& path, int quality = 90) const;
     bool save_qoi(const std::string& path, bool linear_colorspace = false) const;
+    bool save_webp(const std::string& path, bool lossless = true, int quality = 80) const;
     bool save_image(const std::string& path) const;
 
 private:
@@ -449,6 +450,9 @@ public:
     /// Load QOI image from file.
     static std::optional<Pixmap> load_qoi(const std::string& path);
 
+    /// Load WebP image from file.
+    static std::optional<Pixmap> load_webp(const std::string& path);
+
     PixmapRef as_ref() const noexcept {
         return PixmapRef(data_.data(), data_.size(), size_, format_, is_opaque());
     }
@@ -523,6 +527,10 @@ public:
 
     bool save_qoi(const std::string& path, bool linear_colorspace = false) const {
         return as_ref().save_qoi(path, linear_colorspace);
+    }
+
+    bool save_webp(const std::string& path, bool lossless = true, int quality = 80) const {
+        return as_ref().save_webp(path, lossless, quality);
     }
 
     bool save_image(const std::string& path) const {

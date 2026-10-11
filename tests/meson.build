@@ -183,6 +183,13 @@ test_qoi_exe = executable('test_qoi',
 )
 test('qoi_test', test_qoi_exe)
 
+# Sovereign WebP Codec tests
+test_webp_exe = executable('test_webp',
+  'test_webp.cpp',
+  dependencies : nisaba_dep
+)
+test('webp_test', test_webp_exe)
+
 if get_option('enable_gpu')
   test_gpu_exe = executable('test_gpu',
     'test_gpu.cpp',
