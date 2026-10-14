@@ -174,6 +174,7 @@ void Context::setPaintColor(Paint& p, Color color) {
 	p.innerColor = color;
 	p.outerColor = color;
 	p.image = 0;
+	p.customShader = nullptr;
 }
 
 void Context::shapeAntiAlias(bool enabled) {
@@ -190,6 +191,12 @@ void Context::strokePaint(const Paint& paint) {
 	s.stroke.xform = s.stroke.xform.multiply(s.xform);
 }
 
+void Context::strokeShader(std::shared_ptr<class Shader> shader) {
+	State& s = currentState();
+	s.stroke = Paint::custom(std::move(shader));
+	s.stroke.xform = s.stroke.xform.multiply(s.xform);
+}
+
 void Context::fillColor(Color color) {
 	setPaintColor(currentState().fill, color);
 }
@@ -197,6 +204,12 @@ void Context::fillColor(Color color) {
 void Context::fillPaint(const Paint& paint) {
 	State& s = currentState();
 	s.fill = paint;
+	s.fill.xform = s.fill.xform.multiply(s.xform);
+}
+
+void Context::fillShader(std::shared_ptr<class Shader> shader) {
+	State& s = currentState();
+	s.fill = Paint::custom(std::move(shader));
 	s.fill.xform = s.fill.xform.multiply(s.xform);
 }
 
@@ -951,7 +964,7 @@ void Context::fill() {
 	                    std::abs(s.xform[0] - s.xform[3]) < 1e-4f && s.xform[0] > 0.0f);
 	bool isAxisAligned = (std::abs(s.xform[1]) < 1e-4f && std::abs(s.xform[2]) < 1e-4f &&
 	                      s.xform[0] > 0.0f && s.xform[3] > 0.0f);
-	bool isSolid = (fillPaint.image == 0 && fillPaint.extent[0] == 0.0f && fillPaint.extent[1] == 0.0f &&
+	bool isSolid = (fillPaint.customShader == nullptr && fillPaint.image == 0 && fillPaint.extent[0] == 0.0f && fillPaint.extent[1] == 0.0f &&
 	                fillPaint.radius == 0.0f &&
 	                fillPaint.innerColor.r == fillPaint.outerColor.r &&
 	                fillPaint.innerColor.g == fillPaint.outerColor.g &&
@@ -1053,6 +1066,18 @@ void Context::fill() {
 			quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
 			quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
 			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 4 /* ShaderSolid */);
+			return;
+		}
+
+		if (fillPaint.customShader != nullptr) {
+			Vertex quad[6];
+			quad[0] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
+			quad[1] = Vertex(p3.x, p3.y, 0.5f, 1.0f, c);
+			quad[2] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
+			quad[3] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
+			quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
+			quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
+			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, -1 /* derive from paint */);
 			return;
 		}
 
@@ -1194,7 +1219,7 @@ void Context::stroke() {
 	bool isConformal = std::abs(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1] -
 	                            (s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3])) < 1e-4f &&
 	                   std::abs(s.xform[0] * s.xform[2] + s.xform[1] * s.xform[3]) < 1e-4f;
-	bool isSolid = (strokePaint.image == 0 && strokePaint.extent[0] == 0.0f && strokePaint.extent[1] == 0.0f &&
+	bool isSolid = (strokePaint.customShader == nullptr && strokePaint.image == 0 && strokePaint.extent[0] == 0.0f && strokePaint.extent[1] == 0.0f &&
 	                strokePaint.radius == 0.0f &&
 	                strokePaint.innerColor.r == strokePaint.outerColor.r &&
 	                strokePaint.innerColor.g == strokePaint.outerColor.g &&

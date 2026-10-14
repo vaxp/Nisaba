@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include "nisaba/color/color.hpp"
 #include "nisaba/color/blend_mode.hpp"
 #include "nisaba/shaders/shader.hpp"
@@ -8,6 +9,10 @@
 #include "nisaba/effects/color_matrix.hpp"
 
 namespace nisaba {
+
+namespace gpu {
+    class Shader;
+}
 
 struct PixmapPaint {
     float opacity{1.0f};
@@ -26,21 +31,39 @@ public:
     bool force_hq_pipeline{false};
     std::optional<effects::ColorMatrix> color_filter{std::nullopt};
 
+    std::shared_ptr<gpu::Shader> custom_shader{nullptr};
+
     Paint() noexcept = default;
 
     explicit Paint(Color color) noexcept : shader(Shader::from_color(color)) {}
     explicit Paint(Shader sh) noexcept : shader(std::move(sh)) {}
+    explicit Paint(std::shared_ptr<gpu::Shader> customSh) noexcept : custom_shader(std::move(customSh)) {}
+
+    void set_shader(std::shared_ptr<gpu::Shader> s) noexcept {
+        custom_shader = std::move(s);
+    }
+    void setShader(std::shared_ptr<gpu::Shader> s) noexcept {
+        custom_shader = std::move(s);
+    }
+    [[nodiscard]] std::shared_ptr<gpu::Shader> getShader() const noexcept {
+        return custom_shader;
+    }
+    [[nodiscard]] bool has_custom_shader() const noexcept {
+        return custom_shader != nullptr;
+    }
 
     void set_color(Color color) noexcept {
+        custom_shader = nullptr;
         shader = Shader::from_color(color);
     }
 
     void set_color_rgba8(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) noexcept {
+        custom_shader = nullptr;
         shader = Shader::from_color_rgba8(r, g, b, a);
     }
 
     [[nodiscard]] bool is_solid_color() const noexcept {
-        return shader.is_solid_color();
+        return custom_shader == nullptr && shader.is_solid_color();
     }
 
     void set_color_filter(const effects::ColorMatrix& filter) noexcept {

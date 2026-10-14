@@ -10,6 +10,7 @@
 // -----------------------------------------------------------------------------
 
 #include "nisaba/gpu/gl3_renderer.hpp"
+#include "nisaba/gpu/runtime_effect.hpp"
 
 #include <GL/glew.h>
 #include <GL/gl.h>
@@ -49,7 +50,7 @@ enum ShaderType {
 
 constexpr int ParamsBinding = 0;
 
-struct Shader {
+struct GLShader {
 	GLuint prog{0};
 	GLuint frag{0};
 	GLuint vert{0};
@@ -95,6 +96,7 @@ struct Call {
 	int scissorRect[4]{-1, -1, -1, -1};
 	int clipDepth{0};
 	Winding winding{Winding::CounterClockwise};
+	std::shared_ptr<nisaba::gpu::Shader> customShader{nullptr};
 };
 
 struct GLPath {
@@ -149,14 +151,14 @@ static void checkGLError(int flags, const char* str) {
 	}
 }
 
-static bool createShader(Shader& shader, const char* name, const char* header, const char* opts,
+static bool createShader(GLShader& shader, const char* name, const char* header, const char* opts,
                          const char* vshader, const char* fshader) {
 	GLint status = 0;
 	const char* str[3];
 	str[0] = header;
 	str[1] = (opts != nullptr) ? opts : "";
 
-	shader = Shader{};
+	shader = GLShader{};
 
 	GLuint prog = glCreateProgram();
 	GLuint vert = glCreateShader(GL_VERTEX_SHADER);
@@ -209,14 +211,14 @@ static bool createShader(Shader& shader, const char* name, const char* header, c
 	return true;
 }
 
-static void deleteShader(Shader& shader) {
+static void deleteShader(GLShader& shader) {
 	if (shader.prog != 0) glDeleteProgram(shader.prog);
 	if (shader.vert != 0) glDeleteShader(shader.vert);
 	if (shader.frag != 0) glDeleteShader(shader.frag);
-	shader = Shader{};
+	shader = GLShader{};
 }
 
-static void getUniforms(Shader& shader) {
+static void getUniforms(GLShader& shader) {
 	shader.loc[LocViewSize] = glGetUniformLocation(shader.prog, "viewSize");
 	shader.loc[LocTex]      = glGetUniformLocation(shader.prog, "tex");
 	shader.loc[LocParams]   = glGetUniformBlockIndex(shader.prog, "NisabaShaderParams");
@@ -266,7 +268,7 @@ static Blend convertBlend(const CompositeOperationState& op) {
 // -------------------------------------------------------------
 struct GL3Renderer::Impl {
 	int flags{0};
-	Shader shader;
+	GLShader shader;
 	float view[2]{0.0f, 0.0f};
 
 	std::vector<Texture> textures;
@@ -402,6 +404,24 @@ struct GL3Renderer::Impl {
 		}
 		bindTexture(tex != nullptr ? tex->tex : 0);
 		checkGLError(flags, "tex paint tex");
+	}
+
+	void bindCallShader(const Call& call, int uniformOffset, int image) {
+		if (call.customShader) {
+			auto rts = std::dynamic_pointer_cast<RuntimeShader>(call.customShader);
+			if (rts) {
+				rts->bind(view);
+				return;
+			}
+		}
+		setUniforms(uniformOffset, image);
+	}
+
+	void unbindCallShader(const Call& call) {
+		if (call.customShader) {
+			glUseProgram(shader.prog);
+			boundUniformOffset = -1;
+		}
 	}
 
 	std::vector<GLint> fanFirst;
@@ -565,7 +585,7 @@ struct GL3Renderer::Impl {
 
 			// 2. Draw anti-aliased pixels (AA Fringe)
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			setUniforms(call.uniformOffset + fragSize, call.image);
+			bindCallShader(call, call.uniformOffset + fragSize, call.image);
 			checkGLError(flags, "fill clip fill");
 
 			if ((flags & CreateFlags::Antialias) != 0) {
@@ -587,6 +607,7 @@ struct GL3Renderer::Impl {
 			stencilMask(0x00);
 			stencilFunc(GL_EQUAL, clipRef, 0xf0);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+			unbindCallShader(call);
 			return;
 		}
 
@@ -609,7 +630,7 @@ struct GL3Renderer::Impl {
 
 		// 2. Draw anti-aliased pixels (AA Fringe)
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		setUniforms(call.uniformOffset + fragSize, call.image);
+		bindCallShader(call, call.uniformOffset + fragSize, call.image);
 		checkGLError(flags, "fill fill");
 
 		if ((flags & CreateFlags::Antialias) != 0) {
@@ -626,6 +647,7 @@ struct GL3Renderer::Impl {
 		glDrawArrays(GL_TRIANGLE_STRIP, call.triangleOffset, call.triangleCount);
 
 		glDisable(GL_STENCIL_TEST);
+		unbindCallShader(call);
 	}
 
 	void convexFill(const Call& call, int activeClipDepth) {
@@ -641,7 +663,7 @@ struct GL3Renderer::Impl {
 			glDisable(GL_STENCIL_TEST);
 		}
 
-		setUniforms(call.uniformOffset, call.image);
+		bindCallShader(call, call.uniformOffset, call.image);
 		checkGLError(flags, "convex fill");
 
 		if (npaths == 1) {
@@ -651,6 +673,7 @@ struct GL3Renderer::Impl {
 			if (callPaths[0].strokeCount > 0) {
 				glDrawArrays(GL_TRIANGLE_STRIP, callPaths[0].strokeOffset, callPaths[0].strokeCount);
 			}
+			unbindCallShader(call);
 			return;
 		}
 
@@ -681,6 +704,7 @@ struct GL3Renderer::Impl {
 		if (!stripFirst.empty()) {
 			glMultiDrawArrays(GL_TRIANGLE_STRIP, stripFirst.data(), stripCount.data(), static_cast<GLsizei>(stripFirst.size()));
 		}
+		unbindCallShader(call);
 	}
 
 	void stroke(const Call& call, int activeClipDepth) {
@@ -694,13 +718,13 @@ struct GL3Renderer::Impl {
 				stencilMask(0x0f);
 				stencilFunc(GL_EQUAL, clipRef, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
-				setUniforms(call.uniformOffset + fragSize, call.image);
+				bindCallShader(call, call.uniformOffset + fragSize, call.image);
 				checkGLError(flags, "stroke fill 0");
 				for (int i = 0; i < npaths; i++) {
 					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
-				setUniforms(call.uniformOffset, call.image);
+				bindCallShader(call, call.uniformOffset, call.image);
 				stencilMask(0x00);
 				stencilFunc(GL_EQUAL, clipRef, 0xf0);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -724,13 +748,13 @@ struct GL3Renderer::Impl {
 				stencilMask(0xff);
 				stencilFunc(GL_EQUAL, 0x0, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
-				setUniforms(call.uniformOffset + fragSize, call.image);
+				bindCallShader(call, call.uniformOffset + fragSize, call.image);
 				checkGLError(flags, "stroke fill 0");
 				for (int i = 0; i < npaths; i++) {
 					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
-				setUniforms(call.uniformOffset, call.image);
+				bindCallShader(call, call.uniformOffset, call.image);
 				stencilFunc(GL_EQUAL, 0x00, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				for (int i = 0; i < npaths; i++) {
@@ -747,6 +771,7 @@ struct GL3Renderer::Impl {
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 				glDisable(GL_STENCIL_TEST);
 			}
+			unbindCallShader(call);
 		} else {
 			if (activeClipDepth > 0) {
 				glEnable(GL_STENCIL_TEST);
@@ -756,7 +781,7 @@ struct GL3Renderer::Impl {
 			} else {
 				glDisable(GL_STENCIL_TEST);
 			}
-			setUniforms(call.uniformOffset, call.image);
+			bindCallShader(call, call.uniformOffset, call.image);
 			checkGLError(flags, "stroke");
 			if (npaths == 1) {
 				if (callPaths[0].strokeCount > 0) {
@@ -777,6 +802,7 @@ struct GL3Renderer::Impl {
 					glMultiDrawArrays(GL_TRIANGLE_STRIP, stripFirst.data(), stripCount.data(), static_cast<GLsizei>(stripFirst.size()));
 				}
 			}
+			unbindCallShader(call);
 		}
 	}
 
@@ -789,9 +815,10 @@ struct GL3Renderer::Impl {
 		} else {
 			glDisable(GL_STENCIL_TEST);
 		}
-		setUniforms(call.uniformOffset, call.image);
+		bindCallShader(call, call.uniformOffset, call.image);
 		checkGLError(flags, "triangles fill");
 		glDrawArrays(GL_TRIANGLES, call.triangleOffset, call.triangleCount);
+		unbindCallShader(call);
 	}
 
 	void clip(const Call& call, int& activeClipDepth) {
@@ -1433,6 +1460,7 @@ void GL3Renderer::renderFill(const Paint& paint, const CompositeOperationState& 
 			Call& last = m_impl->calls.back();
 			if (last.type == CallType::Triangles &&
 			    last.image == paint.image &&
+			    last.customShader == paint.customShader &&
 			    last.blendFunc.srcRGB == blend.srcRGB &&
 			    last.blendFunc.dstRGB == blend.dstRGB &&
 			    last.blendFunc.srcAlpha == blend.srcAlpha &&
@@ -1483,6 +1511,7 @@ void GL3Renderer::renderFill(const Paint& paint, const CompositeOperationState& 
 		call.type = CallType::Triangles;
 		call.clipDepth = m_impl->currentClipDepth;
 		call.image = paint.image;
+		call.customShader = paint.customShader;
 		call.blendFunc = blend;
 		call.triangleOffset = static_cast<int>(m_impl->verts.size());
 		call.triangleCount = numTriVerts;
@@ -1542,6 +1571,7 @@ void GL3Renderer::renderFill(const Paint& paint, const CompositeOperationState& 
 	call.pathOffset = static_cast<int>(m_impl->paths.size());
 	call.pathCount = npaths;
 	call.image = paint.image;
+	call.customShader = paint.customShader;
 	call.blendFunc = blend;
 	if (hasHwScissor) {
 		call.scissorRect[0] = hwScissor[0];
@@ -1651,6 +1681,7 @@ void GL3Renderer::renderStroke(const Paint& paint, const CompositeOperationState
 			Call& last = m_impl->calls.back();
 			if (last.type == CallType::Triangles &&
 			    last.image == paint.image &&
+			    last.customShader == paint.customShader &&
 			    last.blendFunc.srcRGB == blend.srcRGB &&
 			    last.blendFunc.dstRGB == blend.dstRGB &&
 			    last.blendFunc.srcAlpha == blend.srcAlpha &&
@@ -1695,6 +1726,7 @@ void GL3Renderer::renderStroke(const Paint& paint, const CompositeOperationState
 		call.type = CallType::Triangles;
 		call.clipDepth = m_impl->currentClipDepth;
 		call.image = paint.image;
+		call.customShader = paint.customShader;
 		call.blendFunc = blend;
 		call.triangleOffset = static_cast<int>(m_impl->verts.size());
 		call.triangleCount = numTriVerts;
@@ -1747,6 +1779,7 @@ void GL3Renderer::renderStroke(const Paint& paint, const CompositeOperationState
 	call.pathOffset = static_cast<int>(m_impl->paths.size());
 	call.pathCount = npaths;
 	call.image = paint.image;
+	call.customShader = paint.customShader;
 	call.blendFunc = blend;
 	call.useStencil = useStencil;
 	if (hasHwScissor) {
@@ -1847,6 +1880,7 @@ void GL3Renderer::renderTriangles(const Paint& paint, const CompositeOperationSt
 		Call& last = m_impl->calls.back();
 		if (last.type == CallType::Triangles &&
 		    last.image == paint.image &&
+		    last.customShader == paint.customShader &&
 		    last.blendFunc.srcRGB == blend.srcRGB &&
 		    last.blendFunc.dstRGB == blend.dstRGB &&
 		    last.blendFunc.srcAlpha == blend.srcAlpha &&
@@ -1872,6 +1906,7 @@ void GL3Renderer::renderTriangles(const Paint& paint, const CompositeOperationSt
 	call.type = CallType::Triangles;
 	call.clipDepth = m_impl->currentClipDepth;
 	call.image = paint.image;
+	call.customShader = paint.customShader;
 	call.blendFunc = blend;
 	call.triangleOffset = static_cast<int>(m_impl->verts.size());
 	call.triangleCount = nverts;

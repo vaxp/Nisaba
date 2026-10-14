@@ -187,7 +187,12 @@ void GpuCanvas::reset_clip() noexcept {
 void GpuCanvas::apply_fill_paint(const nisaba::Paint& paint) {
     if (!context_) return;
 
-    if (paint.shader.type() == Shader::Type::LinearGradient) {
+    if (paint.custom_shader) {
+        context_->fillShader(paint.custom_shader);
+        return;
+    }
+
+    if (paint.shader.type() == nisaba::Shader::Type::LinearGradient) {
         const auto& lg = paint.shader.linear_gradient();
         nisaba::Point p0 = lg.start();
         nisaba::Point p1 = lg.end();
@@ -195,7 +200,7 @@ void GpuCanvas::apply_fill_paint(const nisaba::Paint& paint) {
         nisaba::Color c1 = lg.stops().empty() ? nisaba::Color::WHITE : lg.stops().back().color;
         context_->fillPaint(context_->linearGradient(p0.x, p0.y, p1.x, p1.y, c0, c1));
         return;
-    } else if (paint.shader.type() == Shader::Type::RadialGradient) {
+    } else if (paint.shader.type() == nisaba::Shader::Type::RadialGradient) {
         const auto& rg = paint.shader.radial_gradient();
         nisaba::Point center = rg.center();
         float radius = rg.radius();
@@ -215,7 +220,12 @@ void GpuCanvas::apply_stroke(const nisaba::Stroke& stroke, const nisaba::Paint& 
     context_->lineCap(stroke.line_cap);
     context_->lineJoin(stroke.line_join);
 
-    if (paint.shader.type() == Shader::Type::LinearGradient) {
+    if (paint.custom_shader) {
+        context_->strokeShader(paint.custom_shader);
+        return;
+    }
+
+    if (paint.shader.type() == nisaba::Shader::Type::LinearGradient) {
         const auto& lg = paint.shader.linear_gradient();
         nisaba::Point p0 = lg.start();
         nisaba::Point p1 = lg.end();
@@ -223,7 +233,7 @@ void GpuCanvas::apply_stroke(const nisaba::Stroke& stroke, const nisaba::Paint& 
         nisaba::Color c1 = lg.stops().empty() ? nisaba::Color::WHITE : lg.stops().back().color;
         context_->strokePaint(context_->linearGradient(p0.x, p0.y, p1.x, p1.y, c0, c1));
         return;
-    } else if (paint.shader.type() == Shader::Type::RadialGradient) {
+    } else if (paint.shader.type() == nisaba::Shader::Type::RadialGradient) {
         const auto& rg = paint.shader.radial_gradient();
         nisaba::Point center = rg.center();
         float radius = rg.radius();

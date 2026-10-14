@@ -52,6 +52,9 @@ Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union,
 ### Hardware-Accelerated GPU Backdrop Blur & Frosted Glass Showcase (`DualKawaseBlur`)
 ![Nisaba GPU Blur Showcase](showcase/glass_gpu_blur_verified.png)
 
+### Sovereign Procedural Runtime Shaders & Dynamic Container Injection Showcase (`nisaba::gpu::RuntimeEffect` & `RuntimeShader`)
+![Nisaba Runtime Shaders Showcase](showcase/runtime_shaders_visual_showcase.png)
+
 ### Sovereign Lottie Vector Animation Engine Showcase (`nisaba::lottie` & Hardware GPU Acceleration)
 ![Nisaba Lottie GPU Showcase](showcase/nisaba_lottie_gpu_showcase.png)
 
@@ -216,6 +219,13 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Ultra-Low CPU Command Overhead & Sustained High Frame Rates**:
   - Highly optimized GPU command recording and state caching delivering near-zero CPU submission overhead and sustained 120+ FPS throughput across complex vector scenes.
 - **Continuous Ribbon Stroking & High-Density Tessellation**: Adaptive curved geometry tessellation with averaged vertex miter normals for continuous, break-free ribbons and strokes at arbitrary angles.
+- **Procedural Runtime Shaders & Dynamic Shader Injection Pipeline (`RuntimeEffect`, `RuntimeShaderBuilder`, `Shader`)**:
+  - Runtime compilation and execution of procedural GLSL fragment programs on the OpenGL hardware pipeline.
+  - Automatic synthesis and compilation into GLSL 150 Core with automated uniform reflection (`float`, `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, `int`).
+  - High-precision local coordinate transformation matrix (`u_localMatrix`) with inverted affine transformation for resolution-independent local `fragCoord` evaluation.
+  - Direct hardware quad fast-path for axis-aligned rectangles with injected shaders (`Context::fill` and `GpuCanvas::fill_rect`), eliminating stencil passes and tessellation overhead.
+  - Direct integration into vector fills (`Context::fillShader`, `Paint::set_shader`) and vector strokes (`Context::strokeShader`).
+  - Strict paint state isolation with zero uniform or state leaks across consecutive draw calls.
 - **Seamless Dual CPU/GPU Coexistence**: Complete architectural isolation ensuring 0 regressions on CPU rasterization while sharing mathematical types (`Rect`, `Point`, `Color`, `Path`, `Transform`, `RRect`, `BorderRadius`) and textures (`Pixmap`).
 
 
@@ -507,6 +517,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - `TwoPointConicalGradient` (analytical quadratic conical spotlight solver)
   - `SweepGradient` (360-degree angular color wheel)
   - `ComposeShader` / `BlendShader` (multi-shader composition combining two shaders via any blend mode)
+  - `RuntimeEffect` / `RuntimeShaderBuilder` (procedural GLSL 150 Core runtime shaders with uniform reflection and affine local coordinate mapping)
   - `Pattern` with high-performance **Bilinear Filtering**
   - Spread modes: `Pad`, `Reflect`, `Repeat`
 - **29 Blend Modes**: All 12 Porter-Duff modes (`Clear`, `Source`, `Dest`, `SourceOver`, `DestOver`, `SourceIn`, `DestIn`, `SourceOut`, `DestOut`, `SourceAtop`, `DestAtop`, `Xor`) plus 17 advanced blend modes (`Plus`, `Modulate`, `Screen`, `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`, `Multiply`, `Hue`, `Saturation`, `Color`, `Luminosity`).

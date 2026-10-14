@@ -55,8 +55,10 @@ public:
 	void shapeAntiAlias(bool enabled);
 	void strokeColor(Color color);
 	void strokePaint(const Paint& paint);
+	void strokeShader(std::shared_ptr<class Shader> shader);
 	void fillColor(Color color);
 	void fillPaint(const Paint& paint);
+	void fillShader(std::shared_ptr<class Shader> shader);
 	void miterLimit(float limit);
 	void strokeWidth(float size);
 	void lineCap(LineCap cap);

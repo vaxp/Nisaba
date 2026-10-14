@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <array>
-#include <string_view>
 #include <optional>
+#include <memory>
 #include "nisaba/color/color.hpp"
 #include "nisaba/math/point.hpp"
 #include "nisaba/math/rect.hpp"
@@ -354,11 +354,18 @@ struct Paint {
 	Color innerColor{0.0f, 0.0f, 0.0f, 1.0f};
 	Color outerColor{0.0f, 0.0f, 0.0f, 1.0f};
 	int image{0};
+	std::shared_ptr<class Shader> customShader{nullptr};
 
 	static Paint color(Color col) {
 		Paint p;
 		p.innerColor = col;
 		p.outerColor = col;
+		return p;
+	}
+
+	static Paint custom(std::shared_ptr<class Shader> sh) {
+		Paint p;
+		p.customShader = std::move(sh);
 		return p;
 	}
 

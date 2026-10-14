@@ -203,6 +203,12 @@ if get_option('enable_gpu')
   )
   test('gpu_damage_test', test_gpu_damage_exe)
 
+  test_runtime_effect_exe = executable('test_runtime_effect',
+    'test_runtime_effect.cpp',
+    dependencies : [nisaba_dep, extra_deps]
+  )
+  test('runtime_effect_test', test_runtime_effect_exe)
+
   if get_option('enable_vulkan') and vulkan_dep.found()
     test_vulkan_exe = executable('test_vulkan',
       'test_vulkan.cpp',
