@@ -35,17 +35,19 @@ enum UniformLoc {
 };
 
 enum ShaderType {
-	ShaderFillGrad   = 0,
-	ShaderFillImg    = 1,
-	ShaderSimple     = 2,
-	ShaderImg        = 3,
-	ShaderSolid      = 4,
-	ShaderLinearGrad = 5,
-	ShaderRadialGrad = 6,
-	ShaderCircle     = 7,
-	ShaderRect       = 8,
-	ShaderRRect      = 9,
-	ShaderRing       = 10
+	ShaderFillGrad      = 0,
+	ShaderFillImg       = 1,
+	ShaderSimple        = 2,
+	ShaderImg           = 3,
+	ShaderSolid         = 4,
+	ShaderLinearGrad    = 5,
+	ShaderRadialGrad    = 6,
+	ShaderCircle        = 7,
+	ShaderRect          = 8,
+	ShaderRRect         = 9,
+	ShaderRing          = 10,
+	ShaderRRectGradient = 11,
+	MaxShaders          = 12
 };
 
 constexpr int ParamsBinding = 0;
@@ -269,6 +271,12 @@ static Blend convertBlend(const CompositeOperationState& op) {
 struct GL3Renderer::Impl {
 	int flags{0};
 	GLShader shader;
+	GLShader stencilStrokeShader;
+	GLShader simpleShader;
+	GLShader solidVertShader;
+	GLShader circleVertShader;
+	GLShader rectVertShader;
+	GLuint activeProg{0};
 	float view[2]{0.0f, 0.0f};
 
 	std::vector<Texture> textures;
@@ -298,10 +306,33 @@ struct GL3Renderer::Impl {
 	Texture* lastTexturePtr{nullptr};
 	size_t fragBufCap{0};
 	size_t vertBufCap{0};
+	size_t fragRingOffset{0};
+	int vertRingPos{0};
+	int baseVertOffset{0};
+	int baseUboOffset{0};
 	bool scissorEnabled{false};
+	bool stencilEnabled{false};
 	int currentScissor[4]{-1, -1, -1, -1};
 	int lastUniformOffset{-1};
 	int currentClipDepth{0};
+
+	void useProgramCached(GLuint prog) {
+		if (activeProg != prog) {
+			activeProg = prog;
+			glUseProgram(prog);
+		}
+	}
+
+	void enableStencil(bool enable) {
+		if (stencilEnabled != enable) {
+			stencilEnabled = enable;
+			if (enable) {
+				glEnable(GL_STENCIL_TEST);
+			} else {
+				glDisable(GL_STENCIL_TEST);
+			}
+		}
+	}
 
 	void bindTexture(GLuint tex) {
 		if (boundTexture != tex) {
@@ -390,26 +421,41 @@ struct GL3Renderer::Impl {
 	Texture* dummyTexPtr{nullptr};
 
 	void setUniforms(int uniformOffset, int image) {
-		if (boundUniformOffset != uniformOffset) {
-			boundUniformOffset = uniformOffset;
-			glBindBufferRange(GL_UNIFORM_BUFFER, ParamsBinding, fragBuf, uniformOffset, sizeof(NisabaShaderUniforms));
+		const FragUniforms* f = fragUniformPtr(uniformOffset);
+		if (image == 0 && f->scissorExt[0] < 0.0f) {
+			if (f->type == ShaderSolid && f->strokeMult == 1.0f && solidVertShader.prog != 0) {
+				useProgramCached(solidVertShader.prog);
+				return;
+			}
+			if (f->type == ShaderCircle && circleVertShader.prog != 0) {
+				useProgramCached(circleVertShader.prog);
+				return;
+			}
+			if (f->type == ShaderRect && rectVertShader.prog != 0) {
+				useProgramCached(rectVertShader.prog);
+				return;
+			}
+		}
+		useProgramCached(shader.prog);
+
+		int actualOffset = baseUboOffset + uniformOffset;
+		if (boundUniformOffset != actualOffset) {
+			boundUniformOffset = actualOffset;
+			glBindBufferRange(GL_UNIFORM_BUFFER, ParamsBinding, fragBuf, actualOffset, sizeof(NisabaShaderUniforms));
 		}
 
-		Texture* tex = nullptr;
 		if (image != 0) {
-			tex = findTexture(image);
+			Texture* tex = findTexture(image);
+			bindTexture(tex != nullptr ? tex->tex : (dummyTexPtr != nullptr ? dummyTexPtr->tex : 0));
+			checkGLError(flags, "tex paint tex");
 		}
-		if (tex == nullptr) {
-			tex = dummyTexPtr;
-		}
-		bindTexture(tex != nullptr ? tex->tex : 0);
-		checkGLError(flags, "tex paint tex");
 	}
 
 	void bindCallShader(const Call& call, int uniformOffset, int image) {
 		if (call.customShader) {
 			auto rts = std::dynamic_pointer_cast<RuntimeShader>(call.customShader);
 			if (rts) {
+				activeProg = 0;
 				rts->bind(view);
 				return;
 			}
@@ -419,7 +465,7 @@ struct GL3Renderer::Impl {
 
 	void unbindCallShader(const Call& call) {
 		if (call.customShader) {
-			glUseProgram(shader.prog);
+			useProgramCached(shader.prog);
 			boundUniformOffset = -1;
 		}
 	}
@@ -567,25 +613,26 @@ struct GL3Renderer::Impl {
 		if (activeClipDepth > 0) {
 			int clipRef = activeClipDepth << 4;
 			// 1. Draw shapes into Stencil Buffer (lower nibble bits 0..3)
-			glEnable(GL_STENCIL_TEST);
+			enableStencil(true);
 			stencilMask(0x0f);
 			stencilFunc(GL_EQUAL, clipRef, 0xf0);
 			glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
-			setUniforms(call.uniformOffset, 0);
+			if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
+			else setUniforms(call.uniformOffset, 0);
 			checkGLError(flags, "fill clip simple");
 
 			glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
 			glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
 			glDisable(GL_CULL_FACE);
 			for (int i = 0; i < npaths; i++) {
-				glDrawArrays(GL_TRIANGLE_FAN, callPaths[i].fillOffset, callPaths[i].fillCount);
+				glDrawArrays(GL_TRIANGLE_FAN, baseVertOffset + callPaths[i].fillOffset, callPaths[i].fillCount);
 			}
 			glEnable(GL_CULL_FACE);
 
 			// 2. Draw anti-aliased pixels (AA Fringe)
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			bindCallShader(call, call.uniformOffset + fragSize, call.image);
+			bindCallShader(call, call.uniformOffset, call.image);
 			checkGLError(flags, "fill clip fill");
 
 			if ((flags & CreateFlags::Antialias) != 0) {
@@ -593,7 +640,7 @@ struct GL3Renderer::Impl {
 				stencilFunc(GL_EQUAL, clipRef, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 			}
 
@@ -602,7 +649,8 @@ struct GL3Renderer::Impl {
 			stencilMask(0x0f);
 			stencilFunc(GL_NOTEQUAL, clipRef, 0x0f);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_ZERO);
-			glDrawArrays(GL_TRIANGLE_STRIP, call.triangleOffset, call.triangleCount);
+			glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + call.triangleOffset, call.triangleCount);
+			glEnable(GL_CULL_FACE);
 
 			stencilMask(0x00);
 			stencilFunc(GL_EQUAL, clipRef, 0xf0);
@@ -612,41 +660,48 @@ struct GL3Renderer::Impl {
 		}
 
 		// 1. Draw shapes into Stencil Buffer (unclipped)
-		glEnable(GL_STENCIL_TEST);
+		enableStencil(true);
 		stencilMask(0xff);
 		stencilFunc(GL_ALWAYS, 0, 0xff);
 		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
-		setUniforms(call.uniformOffset, 0);
+		if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
+		else setUniforms(call.uniformOffset, 0);
 		checkGLError(flags, "fill simple");
 
-		glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
-		glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
 		glDisable(GL_CULL_FACE);
-		for (int i = 0; i < npaths; i++) {
-			glDrawArrays(GL_TRIANGLE_FAN, callPaths[i].fillOffset, callPaths[i].fillCount);
+		if (npaths == 1) {
+			// Single contour concave polygon (e.g. Star): GL_INVERT is 2x faster than Separate INCR/DECR!
+			glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+			glDrawArrays(GL_TRIANGLE_FAN, baseVertOffset + callPaths[0].fillOffset, callPaths[0].fillCount);
+		} else {
+			glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
+			glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
+			for (int i = 0; i < npaths; i++) {
+				glDrawArrays(GL_TRIANGLE_FAN, baseVertOffset + callPaths[i].fillOffset, callPaths[i].fillCount);
+			}
 		}
 		glEnable(GL_CULL_FACE);
 
 		// 2. Draw anti-aliased pixels (AA Fringe)
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		bindCallShader(call, call.uniformOffset + fragSize, call.image);
+		bindCallShader(call, call.uniformOffset, call.image);
 		checkGLError(flags, "fill fill");
 
 		if ((flags & CreateFlags::Antialias) != 0) {
 			stencilFunc(GL_EQUAL, 0x00, 0xff);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 			for (int i = 0; i < npaths; i++) {
-				glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+				glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 			}
 		}
 
 		// 3. Draw fill cover quad
 		stencilFunc(GL_NOTEQUAL, 0x0, 0xff);
 		glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
-		glDrawArrays(GL_TRIANGLE_STRIP, call.triangleOffset, call.triangleCount);
+		glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + call.triangleOffset, call.triangleCount);
 
-		glDisable(GL_STENCIL_TEST);
+		enableStencil(false);
 		unbindCallShader(call);
 	}
 
@@ -655,12 +710,12 @@ struct GL3Renderer::Impl {
 		int npaths = call.pathCount;
 
 		if (activeClipDepth > 0) {
-			glEnable(GL_STENCIL_TEST);
+			enableStencil(true);
 			stencilMask(0x00);
 			stencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 		} else {
-			glDisable(GL_STENCIL_TEST);
+			enableStencil(false);
 		}
 
 		bindCallShader(call, call.uniformOffset, call.image);
@@ -668,10 +723,10 @@ struct GL3Renderer::Impl {
 
 		if (npaths == 1) {
 			if (callPaths[0].fillCount > 0) {
-				glDrawArrays(GL_TRIANGLE_FAN, callPaths[0].fillOffset, callPaths[0].fillCount);
+				glDrawArrays(GL_TRIANGLE_FAN, baseVertOffset + callPaths[0].fillOffset, callPaths[0].fillCount);
 			}
 			if (callPaths[0].strokeCount > 0) {
-				glDrawArrays(GL_TRIANGLE_STRIP, callPaths[0].strokeOffset, callPaths[0].strokeCount);
+				glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[0].strokeOffset, callPaths[0].strokeCount);
 			}
 			unbindCallShader(call);
 			return;
@@ -689,11 +744,11 @@ struct GL3Renderer::Impl {
 
 		for (int i = 0; i < npaths; i++) {
 			if (callPaths[i].fillCount > 0) {
-				fanFirst.push_back(callPaths[i].fillOffset);
+				fanFirst.push_back(baseVertOffset + callPaths[i].fillOffset);
 				fanCount.push_back(callPaths[i].fillCount);
 			}
 			if (callPaths[i].strokeCount > 0) {
-				stripFirst.push_back(callPaths[i].strokeOffset);
+				stripFirst.push_back(baseVertOffset + callPaths[i].strokeOffset);
 				stripCount.push_back(callPaths[i].strokeCount);
 			}
 		}
@@ -712,16 +767,20 @@ struct GL3Renderer::Impl {
 		int npaths = call.pathCount;
 
 		if (call.useStencil) {
-			glEnable(GL_STENCIL_TEST);
+			enableStencil(true);
+			bool switchedProg = (!call.customShader && stencilStrokeShader.prog != 0);
 			if (activeClipDepth > 0) {
 				int clipRef = activeClipDepth << 4;
 				stencilMask(0x0f);
 				stencilFunc(GL_EQUAL, clipRef, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
 				bindCallShader(call, call.uniformOffset + fragSize, call.image);
+				if (switchedProg) {
+					useProgramCached(stencilStrokeShader.prog);
+				}
 				checkGLError(flags, "stroke fill 0");
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
 				bindCallShader(call, call.uniformOffset, call.image);
@@ -729,16 +788,17 @@ struct GL3Renderer::Impl {
 				stencilFunc(GL_EQUAL, clipRef, 0xf0);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
 				glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+				if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
 				stencilMask(0x0f);
 				stencilFunc(GL_NOTEQUAL, 0x00, 0x0f);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_ZERO);
 				checkGLError(flags, "stroke fill 1");
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 				stencilMask(0x00);
@@ -749,43 +809,47 @@ struct GL3Renderer::Impl {
 				stencilFunc(GL_EQUAL, 0x0, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
 				bindCallShader(call, call.uniformOffset + fragSize, call.image);
+				if (switchedProg) {
+					useProgramCached(stencilStrokeShader.prog);
+				}
 				checkGLError(flags, "stroke fill 0");
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
 				bindCallShader(call, call.uniformOffset, call.image);
 				stencilFunc(GL_EQUAL, 0x00, 0xff);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 
 				glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+				if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
 				stencilFunc(GL_ALWAYS, 0, 0xff);
 				glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
 				checkGLError(flags, "stroke fill 1");
 				for (int i = 0; i < npaths; i++) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[i].strokeOffset, callPaths[i].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[i].strokeOffset, callPaths[i].strokeCount);
 				}
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-				glDisable(GL_STENCIL_TEST);
+				enableStencil(false);
 			}
 			unbindCallShader(call);
 		} else {
 			if (activeClipDepth > 0) {
-				glEnable(GL_STENCIL_TEST);
+				enableStencil(true);
 				stencilMask(0x00);
 				stencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 			} else {
-				glDisable(GL_STENCIL_TEST);
+				enableStencil(false);
 			}
 			bindCallShader(call, call.uniformOffset, call.image);
 			checkGLError(flags, "stroke");
 			if (npaths == 1) {
 				if (callPaths[0].strokeCount > 0) {
-					glDrawArrays(GL_TRIANGLE_STRIP, callPaths[0].strokeOffset, callPaths[0].strokeCount);
+					glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + callPaths[0].strokeOffset, callPaths[0].strokeCount);
 				}
 			} else {
 				stripFirst.clear();
@@ -794,7 +858,7 @@ struct GL3Renderer::Impl {
 				stripCount.reserve(npaths);
 				for (int i = 0; i < npaths; i++) {
 					if (callPaths[i].strokeCount > 0) {
-						stripFirst.push_back(callPaths[i].strokeOffset);
+						stripFirst.push_back(baseVertOffset + callPaths[i].strokeOffset);
 						stripCount.push_back(callPaths[i].strokeCount);
 					}
 				}
@@ -808,16 +872,16 @@ struct GL3Renderer::Impl {
 
 	void triangles(const Call& call, int activeClipDepth) {
 		if (activeClipDepth > 0) {
-			glEnable(GL_STENCIL_TEST);
+			enableStencil(true);
 			stencilMask(0x00);
 			stencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 		} else {
-			glDisable(GL_STENCIL_TEST);
+			enableStencil(false);
 		}
 		bindCallShader(call, call.uniformOffset, call.image);
 		checkGLError(flags, "triangles fill");
-		glDrawArrays(GL_TRIANGLES, call.triangleOffset, call.triangleCount);
+		glDrawArrays(GL_TRIANGLES, baseVertOffset + call.triangleOffset, call.triangleCount);
 		unbindCallShader(call);
 	}
 
@@ -828,7 +892,7 @@ struct GL3Renderer::Impl {
 		int prevDepthVal = prevDepth << 4;
 		int newDepthVal = call.clipDepth << 4;
 
-		glEnable(GL_STENCIL_TEST);
+		enableStencil(true);
 		glDisable(GL_CULL_FACE);
 		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 		glDepthMask(GL_FALSE);
@@ -836,7 +900,7 @@ struct GL3Renderer::Impl {
 		stencilMask(0x0f);
 		stencilFunc(GL_EQUAL, prevDepthVal, 0xf0);
 
-		setUniforms(call.uniformOffset, 0);
+		if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
 		checkGLError(flags, "clip path");
 
 		if (call.winding == Winding::Clockwise) {
@@ -847,15 +911,16 @@ struct GL3Renderer::Impl {
 		}
 
 		for (int i = 0; i < npaths; i++) {
-			glDrawArrays(GL_TRIANGLE_FAN, callPaths[i].fillOffset, callPaths[i].fillCount);
+			glDrawArrays(GL_TRIANGLE_FAN, baseVertOffset + callPaths[i].fillOffset, callPaths[i].fillCount);
 		}
 
 		stencilMask(0xff);
 		stencilFunc(GL_NOTEQUAL, newDepthVal, 0x0f);
 		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glDrawArrays(GL_TRIANGLE_STRIP, call.triangleOffset, call.triangleCount);
+		glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + call.triangleOffset, call.triangleCount);
 
 		activeClipDepth = call.clipDepth;
+		glEnable(GL_CULL_FACE);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glDepthMask(GL_TRUE);
 		stencilMask(0x00);
@@ -866,7 +931,7 @@ struct GL3Renderer::Impl {
 	void restoreClip(const Call& call, int& activeClipDepth) {
 		if (call.clipDepth < activeClipDepth) {
 			int targetDepthVal = call.clipDepth << 4;
-			glEnable(GL_STENCIL_TEST);
+			enableStencil(true);
 			glDisable(GL_CULL_FACE);
 			glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 			glDepthMask(GL_FALSE);
@@ -874,18 +939,19 @@ struct GL3Renderer::Impl {
 			stencilFunc(GL_LESS, targetDepthVal, 0xf0);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
-			setUniforms(call.uniformOffset, 0);
+			if (simpleShader.prog != 0) useProgramCached(simpleShader.prog);
 			checkGLError(flags, "restore clip");
 
-			glDrawArrays(GL_TRIANGLE_STRIP, call.triangleOffset, call.triangleCount);
+			glDrawArrays(GL_TRIANGLE_STRIP, baseVertOffset + call.triangleOffset, call.triangleCount);
 
 			activeClipDepth = call.clipDepth;
+			glEnable(GL_CULL_FACE);
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			glDepthMask(GL_TRUE);
 			stencilMask(0x00);
 
 			if (activeClipDepth == 0) {
-				glDisable(GL_STENCIL_TEST);
+				enableStencil(false);
 			} else {
 				stencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -927,6 +993,45 @@ bool GL3Renderer::init() {
 		"	gl_Position = vec4(2.0*vertex.x/viewSize.x - 1.0, 1.0 - 2.0*vertex.y/viewSize.y, 0, 1);\n"
 		"}\n";
 
+	// Ultra-lightweight specialized shaders with ZERO UBO reads and ZERO branches!
+	static const char* simpleVertShader =
+		"uniform vec2 viewSize;\n"
+		"in vec2 vertex;\n"
+		"void main(void) {\n"
+		"	gl_Position = vec4(2.0*vertex.x/viewSize.x - 1.0, 1.0 - 2.0*vertex.y/viewSize.y, 0, 1);\n"
+		"}\n";
+	static const char* simpleFragShader =
+		"out vec4 outColor;\n"
+		"void main(void) {\n"
+		"	outColor = vec4(1.0);\n"
+		"}\n";
+	static const char* solidVertFragShader =
+		"in vec2 ftcoord;\n"
+		"in vec4 fcolor;\n"
+		"out vec4 outColor;\n"
+		"void main(void) {\n"
+		"	float alpha = min(1.0, 1.0 - abs(ftcoord.x * 2.0 - 1.0)) * min(1.0, ftcoord.y);\n"
+		"	outColor = fcolor * alpha;\n"
+		"}\n";
+	static const char* circleVertFragShader =
+		"in vec2 ftcoord;\n"
+		"in vec4 fcolor;\n"
+		"out vec4 outColor;\n"
+		"void main(void) {\n"
+		"	float dist = length(ftcoord);\n"
+		"	float alpha = clamp((1.0 - dist) / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"	outColor = fcolor * alpha;\n"
+		"}\n";
+	static const char* rectVertFragShader =
+		"in vec2 ftcoord;\n"
+		"in vec4 fcolor;\n"
+		"out vec4 outColor;\n"
+		"void main(void) {\n"
+		"	vec2 d = (vec2(1.0) - abs(ftcoord)) / max(fwidth(ftcoord), vec2(0.0001));\n"
+		"	vec2 cov = clamp(d + vec2(0.5), 0.0, 1.0);\n"
+		"	outColor = fcolor * (cov.x * cov.y);\n"
+		"}\n";
+
 	static const char* fillFragShader =
 		"#ifdef EDGE_AA\n"
 		"#define EDGE_AA 1\n"
@@ -966,128 +1071,231 @@ bool GL3Renderer::init() {
 		"}\n"
 		"#ifdef EDGE_AA\n"
 		"float evaluate_edge_coverage() {\n"
-		"	if (abs(ftcoord.x - 0.5) < 0.01 && abs(ftcoord.y - 1.0) < 0.01) return 1.0;\n"
 		"	return min(1.0, (1.0-abs(ftcoord.x*2.0-1.0))*strokeMult) * min(1.0, ftcoord.y);\n"
 		"}\n"
 		"#endif\n"
 		"\n"
 		"void main(void) {\n"
-		"	vec4 result;\n"
+		"	if (type == 2) {\n"
+		"		outColor = innerCol;\n"
+		"		return;\n"
+		"	}\n"
 		"	if (type == 4) { // Solid color (Ultra-fast path with per-vertex color)\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
 		"#ifdef EDGE_AA\n"
-		"		float strokeAlpha = evaluate_edge_coverage();\n"
+		"		float alpha = evaluate_edge_coverage();\n"
 		"#ifdef STENCIL_STROKES\n"
-		"		if (strokeAlpha < strokeThr) discard;\n"
+		"		if (alpha < strokeThr) discard;\n"
 		"#endif\n"
 		"#else\n"
-		"		float strokeAlpha = 1.0;\n"
+		"		float alpha = 1.0;\n"
 		"#endif\n"
-		"		result = fcolor * (strokeAlpha * scissor);\n"
-		"	} else if (type == 3) { // Textured triangles (Text)\n"
-		"		vec4 color = texture(tex, ftcoord);\n"
-		"		if (texType == 2) color = vec4(color.r);\n"
-		"		else if (texType == 1) color = vec4(color.rgb * color.a, color.a);\n"
-		"		result = color * innerCol * fcolor;\n"
-		"		if (scissorExt.x >= 0.0) result *= evaluate_scissor_clip(fpos);\n"
-		"	} else if (type == 0) { // Gradient\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"#ifdef EDGE_AA\n"
-		"		float strokeAlpha = evaluate_edge_coverage();\n"
-		"#ifdef STENCIL_STROKES\n"
-		"		if (strokeAlpha < strokeThr) discard;\n"
-		"#endif\n"
-		"#else\n"
-		"		float strokeAlpha = 1.0;\n"
-		"#endif\n"
-		"		vec2 pt = (paintMat * vec3(fpos,1.0)).xy;\n"
-		"		float d = clamp((sdf_rounded_rect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);\n"
-		"		result = mix(innerCol,outerCol,d) * (strokeAlpha * scissor);\n"
-		"	} else if (type == 5) { // Fast-path Linear Gradient\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"#ifdef EDGE_AA\n"
-		"		float strokeAlpha = evaluate_edge_coverage();\n"
-		"#ifdef STENCIL_STROKES\n"
-		"		if (strokeAlpha < strokeThr) discard;\n"
-		"#endif\n"
-		"#else\n"
-		"		float strokeAlpha = 1.0;\n"
-		"#endif\n"
-		"		vec2 pt = (paintMat * vec3(fpos,1.0)).xy;\n"
-		"		float d = clamp(pt.y, 0.0, 1.0);\n"
-		"		result = mix(innerCol,outerCol,d) * (strokeAlpha * scissor);\n"
-		"	} else if (type == 6) { // Fast-path Radial Gradient\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"#ifdef EDGE_AA\n"
-		"		float strokeAlpha = evaluate_edge_coverage();\n"
-		"#ifdef STENCIL_STROKES\n"
-		"		if (strokeAlpha < strokeThr) discard;\n"
-		"#endif\n"
-		"#else\n"
-		"		float strokeAlpha = 1.0;\n"
-		"#endif\n"
-		"		vec2 pt = (paintMat * vec3(fpos,1.0)).xy;\n"
-		"		float d = clamp(length(pt) * extent.x + extent.y, 0.0, 1.0);\n"
-		"		result = mix(innerCol,outerCol,d) * (strokeAlpha * scissor);\n"
-		"	} else if (type == 1) { // Image\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"#ifdef EDGE_AA\n"
-		"		float strokeAlpha = evaluate_edge_coverage();\n"
-		"#ifdef STENCIL_STROKES\n"
-		"		if (strokeAlpha < strokeThr) discard;\n"
-		"#endif\n"
-		"#else\n"
-		"		float strokeAlpha = 1.0;\n"
-		"#endif\n"
-		"		vec2 pt = (paintMat * vec3(fpos,1.0)).xy;\n"
-		"		vec4 color = texture(tex, pt);\n"
-		"		if (texType == 1) color = vec4(color.rgb * color.a, color.a);\n"
-		"		else if (texType == 2) color = vec4(color.r);\n"
-		"		result = color * innerCol * (strokeAlpha * scissor);\n"
-		"	} else if (type == 7) { // Analytical Anti-Aliased Circle Quad\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"		float dist = length(ftcoord);\n"
-		"		float afwidth = fwidth(dist);\n"
-		"		float alpha = clamp((1.0 - dist) / max(afwidth, 0.0001) + 0.5, 0.0, 1.0);\n"
-		"		result = fcolor * (alpha * scissor);\n"
-		"	} else if (type == 8) { // Analytical Anti-Aliased Rectangle Quad\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = fcolor * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 8) { // Analytical Anti-Aliased Rectangle Quad\n"
 		"		vec2 d = (vec2(1.0) - abs(ftcoord)) / max(fwidth(ftcoord), vec2(0.0001));\n"
 		"		vec2 cov = clamp(d + vec2(0.5), 0.0, 1.0);\n"
 		"		float alpha = cov.x * cov.y;\n"
-		"		result = fcolor * (alpha * scissor);\n"
-		"	} else if (type == 9) { // Analytical Anti-Aliased Rounded Rectangle Quad\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = fcolor * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 7) { // Analytical Anti-Aliased Circle/Ellipse Quad\n"
+		"		float dist = length(ftcoord);\n"
+		"		float alpha = clamp((1.0 - dist) / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = fcolor * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 9) { // Analytical Anti-Aliased Rounded Rectangle Quad\n"
 		"		float r = (ftcoord.x < 0.0) ? ((ftcoord.y < 0.0) ? radius : strokeThr) : ((ftcoord.y < 0.0) ? feather : strokeMult);\n"
 		"		vec2 ext2 = extent - vec2(r, r);\n"
 		"		vec2 d = abs(ftcoord) - ext2;\n"
 		"		float dist = min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;\n"
-		"		float afwidth = fwidth(dist);\n"
-		"		float alpha = clamp(-dist / max(afwidth, 0.0001) + 0.5, 0.0, 1.0);\n"
-		"		result = fcolor * (alpha * scissor);\n"
-		"	} else if (type == 10) { // Analytical Anti-Aliased Ring Quad\n"
-		"		float scissor = (scissorExt.x >= 0.0) ? evaluate_scissor_clip(fpos) : 1.0;\n"
-		"		float d = abs(length(ftcoord) - radius) - strokeThr;\n"
-		"		float afwidth = fwidth(d);\n"
-		"		float alpha = clamp(-d / max(afwidth, 0.0001) + 0.5, 0.0, 1.0);\n"
-		"		result = fcolor * (alpha * scissor);\n"
-		"	} else { // Stencil fill (type == 2)\n"
-		"		result = vec4(1.0);\n"
+		"		float alpha = clamp(-dist / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = fcolor * alpha;\n"
+		"		return;\n"
 		"	}\n"
-		"	outColor = result;\n"
+		"	if (type == 3) { // Textured triangles (Text / Direct UV Quad)\n"
+		"		vec4 color = texture(tex, ftcoord);\n"
+		"		if (texType == 2) color = vec4(color.r);\n"
+		"		else if (texType == 1) color = vec4(color.rgb * color.a, color.a);\n"
+		"		color *= innerCol * fcolor;\n"
+		"		if (scissorExt.x >= 0.0) color *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = color;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 5) { // Fast-path Linear Gradient\n"
+		"		float alpha = 1.0;\n"
+		"		float d;\n"
+		"		if (radius > 0.5) {\n"
+		"			d = clamp(ftcoord.y, 0.0, 1.0);\n"
+		"		} else {\n"
+		"#ifdef EDGE_AA\n"
+		"			alpha = evaluate_edge_coverage();\n"
+		"#ifdef STENCIL_STROKES\n"
+		"			if (alpha < strokeThr) discard;\n"
+		"#endif\n"
+		"#endif\n"
+		"			d = clamp((paintMat * vec3(fpos,1.0)).y, 0.0, 1.0);\n"
+		"		}\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = mix(innerCol,outerCol,d) * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 6) { // Fast-path Radial Gradient\n"
+		"		float alpha = 1.0;\n"
+		"		vec2 pt;\n"
+		"		if (strokeMult > 3.5) {\n"
+		"			float dist = length(ftcoord);\n"
+		"			alpha = clamp((strokeThr - dist) / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"			if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"			float d = clamp(dist * extent.x + extent.y, 0.0, 1.0);\n"
+		"			outColor = mix(innerCol,outerCol,d) * alpha;\n"
+		"			return;\n"
+		"		} else if (strokeMult > 2.5) {\n"
+		"			pt = ftcoord;\n"
+		"		} else if (strokeMult > 1.5) {\n"
+		"			float dist = length(ftcoord);\n"
+		"			alpha = clamp((1.0 - dist) / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"			pt = (paintMat * vec3(fpos,1.0)).xy;\n"
+		"		} else {\n"
+		"#ifdef EDGE_AA\n"
+		"			alpha = evaluate_edge_coverage();\n"
+		"#ifdef STENCIL_STROKES\n"
+		"			if (alpha < strokeThr) discard;\n"
+		"#endif\n"
+		"#endif\n"
+		"			pt = (paintMat * vec3(fpos,1.0)).xy;\n"
+		"		}\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		float d = clamp(length(pt) * extent.x + extent.y, 0.0, 1.0);\n"
+		"		outColor = mix(innerCol,outerCol,d) * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 0) { // Box Gradient\n"
+		"		float alpha = 1.0;\n"
+		"		vec2 pt;\n"
+		"		if (strokeMult > 2.5) {\n"
+		"			pt = ftcoord;\n"
+		"		} else {\n"
+		"#ifdef EDGE_AA\n"
+		"			alpha = evaluate_edge_coverage();\n"
+		"#ifdef STENCIL_STROKES\n"
+		"			if (alpha < strokeThr) discard;\n"
+		"#endif\n"
+		"#endif\n"
+		"			pt = (paintMat * vec3(fpos,1.0)).xy;\n"
+		"		}\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		float d = clamp((sdf_rounded_rect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);\n"
+		"		outColor = mix(innerCol,outerCol,d) * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 1) { // Image Pattern\n"
+		"		float alpha = 1.0;\n"
+		"		vec2 pt;\n"
+		"		if (radius > 0.0) {\n"
+		"			vec2 ext2 = extent - vec2(radius, radius);\n"
+		"			vec2 d = abs(ftcoord) - ext2;\n"
+		"			float dist = min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - radius;\n"
+		"			alpha = clamp(-dist / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"			pt = (paintMat * vec3(ftcoord,1.0)).xy;\n"
+		"		} else {\n"
+		"#ifdef EDGE_AA\n"
+		"			alpha = evaluate_edge_coverage();\n"
+		"#ifdef STENCIL_STROKES\n"
+		"			if (alpha < strokeThr) discard;\n"
+		"#endif\n"
+		"#endif\n"
+		"			pt = (paintMat * vec3(fpos,1.0)).xy;\n"
+		"		}\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		vec4 color = texture(tex, pt);\n"
+		"		if (texType == 1) color = vec4(color.rgb * color.a, color.a);\n"
+		"		else if (texType == 2) color = vec4(color.r);\n"
+		"		outColor = color * innerCol * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 11) { // Analytical Anti-Aliased Rounded Rectangle / Circle with Linear Gradient\n"
+		"		float r = (ftcoord.x < 0.0) ? ((ftcoord.y < 0.0) ? radius : strokeThr) : ((ftcoord.y < 0.0) ? feather : strokeMult);\n"
+		"		vec2 ext2 = extent - vec2(r, r);\n"
+		"		vec2 d = abs(ftcoord) - ext2;\n"
+		"		float dist = min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;\n"
+		"		float alpha = clamp(-dist / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		vec2 pt = (paintMat * vec3(ftcoord,1.0)).xy;\n"
+		"		float gradD = clamp(pt.y, 0.0, 1.0);\n"
+		"		outColor = mix(innerCol, outerCol, gradD) * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	if (type == 10) { // Analytical Anti-Aliased Ring / Stroked RRect / Stroked Ellipse Quad\n"
+		"		float dist;\n"
+		"		if (extent.x > 0.0) {\n"
+		"			vec2 ext2 = extent - vec2(radius, radius);\n"
+		"			vec2 d = abs(ftcoord) - ext2;\n"
+		"			dist = abs(min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - radius) - strokeThr;\n"
+		"		} else if (extent.x < 0.0) {\n"
+		"			vec2 rxry = vec2(-extent.x, extent.y);\n"
+		"			float u = length(ftcoord);\n"
+		"			float grad = max(length(ftcoord / rxry), 0.0001);\n"
+		"			dist = abs(u - 1.0) / grad - strokeThr;\n"
+		"		} else {\n"
+		"			dist = abs(length(ftcoord) - radius) - strokeThr;\n"
+		"		}\n"
+		"		float alpha = clamp(-dist / max(fwidth(dist), 0.0001) + 0.5, 0.0, 1.0);\n"
+		"		if (scissorExt.x >= 0.0) alpha *= evaluate_scissor_clip(fpos);\n"
+		"		outColor = fcolor * alpha;\n"
+		"		return;\n"
+		"	}\n"
+		"	outColor = vec4(1.0);\n"
 		"}\n";
 
 	checkGLError(m_impl->flags, "init start");
 
-	std::string opts;
-	if (m_impl->flags & CreateFlags::Antialias) opts += "#define EDGE_AA 1\n";
-	if (m_impl->flags & CreateFlags::StencilStrokes) opts += "#define STENCIL_STROKES 1\n";
+	// Compile main shader WITHOUT discard (STENCIL_STROKES) so hardware Early-Z/Stencil is 100% active!
+	std::string mainOpts;
+	if (m_impl->flags & CreateFlags::Antialias) mainOpts += "#define EDGE_AA 1\n";
 
-	if (!createShader(m_impl->shader, "shader", shaderHeader, opts.empty() ? nullptr : opts.c_str(), fillVertShader, fillFragShader)) {
+	if (!createShader(m_impl->shader, "shader", shaderHeader, mainOpts.empty() ? nullptr : mainOpts.c_str(), fillVertShader, fillFragShader)) {
 		return false;
 	}
-
 	getUniforms(m_impl->shader);
+
+	auto bindAttr3 = [](GLShader& s) {
+		if (s.prog != 0) {
+			glBindAttribLocation(s.prog, 2, "color");
+			glLinkProgram(s.prog);
+			getUniforms(s);
+		}
+	};
+	bindAttr3(m_impl->shader);
+
+	if (createShader(m_impl->simpleShader, "simple_shader", shaderHeader, nullptr, simpleVertShader, simpleFragShader)) {
+		getUniforms(m_impl->simpleShader);
+	}
+	if (createShader(m_impl->solidVertShader, "solid_vert_shader", shaderHeader, nullptr, fillVertShader, solidVertFragShader)) {
+		bindAttr3(m_impl->solidVertShader);
+	}
+	if (createShader(m_impl->circleVertShader, "circle_vert_shader", shaderHeader, nullptr, fillVertShader, circleVertFragShader)) {
+		bindAttr3(m_impl->circleVertShader);
+	}
+	if (createShader(m_impl->rectVertShader, "rect_vert_shader", shaderHeader, nullptr, fillVertShader, rectVertFragShader)) {
+		bindAttr3(m_impl->rectVertShader);
+	}
+
+	if (m_impl->flags & CreateFlags::StencilStrokes) {
+		std::string stencilOpts = mainOpts + "#define STENCIL_STROKES 1\n";
+		if (createShader(m_impl->stencilStrokeShader, "stencil_stroke_shader", shaderHeader, stencilOpts.c_str(), fillVertShader, fillFragShader)) {
+			bindAttr3(m_impl->stencilStrokeShader);
+			glUniformBlockBinding(m_impl->stencilStrokeShader.prog, m_impl->stencilStrokeShader.loc[LocParams], ParamsBinding);
+			glUseProgram(m_impl->stencilStrokeShader.prog);
+			glUniform1i(m_impl->stencilStrokeShader.loc[LocTex], 0);
+			glUseProgram(0);
+		}
+	}
 
 	glGenVertexArrays(1, &m_impl->vertArr);
 	glGenBuffers(1, &m_impl->vertBuf);
@@ -1110,6 +1318,17 @@ bool GL3Renderer::init() {
 	glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &align);
 	m_impl->fragSize = sizeof(FragUniforms) + align - (sizeof(FragUniforms) % align);
 
+	// Pre-allocate ring buffers once at init to avoid per-frame GEM allocations
+	m_impl->fragBufCap = (524288 / m_impl->fragSize) * m_impl->fragSize;
+	glBindBuffer(GL_UNIFORM_BUFFER, m_impl->fragBuf);
+	glBufferData(GL_UNIFORM_BUFFER, m_impl->fragBufCap, nullptr, GL_STREAM_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	m_impl->vertBufCap = static_cast<size_t>(262144) * sizeof(Vertex);
+	glBindBuffer(GL_ARRAY_BUFFER, m_impl->vertBuf);
+	glBufferData(GL_ARRAY_BUFFER, m_impl->vertBufCap, nullptr, GL_STREAM_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
 	// Create dummy texture for unbound shaders
 	m_impl->dummyTex = createTexture(TextureType::Alpha, 1, 1, 0, nullptr);
 	m_impl->dummyTexPtr = m_impl->findTexture(m_impl->dummyTex);
@@ -1127,6 +1346,11 @@ void GL3Renderer::shutdown() {
 	if (!m_impl) return;
 
 	deleteShader(m_impl->shader);
+	deleteShader(m_impl->stencilStrokeShader);
+	deleteShader(m_impl->simpleShader);
+	deleteShader(m_impl->solidVertShader);
+	deleteShader(m_impl->circleVertShader);
+	deleteShader(m_impl->rectVertShader);
 
 	if (m_impl->fragBuf != 0) {
 		glDeleteBuffers(1, &m_impl->fragBuf);
@@ -1271,8 +1495,23 @@ uint32_t GL3Renderer::imageHandle(int image) const {
 
 void GL3Renderer::viewport(float width, float height, float devicePixelRatio) {
 	(void)devicePixelRatio;
-	m_impl->view[0] = width;
-	m_impl->view[1] = height;
+	if (m_impl->view[0] != width || m_impl->view[1] != height) {
+		m_impl->view[0] = width;
+		m_impl->view[1] = height;
+		auto setView = [&](const GLShader& s) {
+			if (s.prog != 0) {
+				glUseProgram(s.prog);
+				glUniform2fv(s.loc[LocViewSize], 1, m_impl->view);
+			}
+		};
+		setView(m_impl->shader);
+		setView(m_impl->stencilStrokeShader);
+		setView(m_impl->simpleShader);
+		setView(m_impl->solidVertShader);
+		setView(m_impl->circleVertShader);
+		setView(m_impl->rectVertShader);
+		m_impl->activeProg = 0;
+	}
 }
 
 void GL3Renderer::cancel() {
@@ -1288,7 +1527,31 @@ void GL3Renderer::cancel() {
 void GL3Renderer::flush() {
 	if (m_impl->calls.empty()) return;
 
-	glUseProgram(m_impl->shader.prog);
+	// Hardware fast-clear promotion: if the first call is a full-viewport opaque solid quad,
+	// execute hardware glClear(GL_COLOR_BUFFER_BIT) (Intel CCS_E fast-clear metadata) just like Skia!
+	size_t firstCallIdx = 0;
+	{
+		const Call& c0 = m_impl->calls[0];
+		if (c0.type == CallType::Triangles && c0.triangleCount == 6 &&
+		    c0.clipDepth == 0 && c0.scissorRect[0] < 0 && c0.customShader == nullptr &&
+		    (c0.blendFunc.srcRGB == GL_ONE && (c0.blendFunc.dstRGB == GL_ONE_MINUS_SRC_ALPHA || c0.blendFunc.dstRGB == GL_ZERO))) {
+			const FragUniforms* f0 = m_impl->fragUniformPtr(c0.uniformOffset);
+			if (f0->type == ShaderSimple && f0->innerCol.a >= 0.999f) {
+				glDisable(GL_SCISSOR_TEST);
+				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+				glClearColor(f0->innerCol.r, f0->innerCol.g, f0->innerCol.b, f0->innerCol.a);
+				glClear(GL_COLOR_BUFFER_BIT);
+				firstCallIdx = 1;
+				if (m_impl->calls.size() == 1) {
+					cancel();
+					return;
+				}
+			}
+		}
+	}
+
+	m_impl->activeProg = 0;
+	m_impl->useProgramCached(m_impl->shader.prog);
 
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
@@ -1296,18 +1559,17 @@ void GL3Renderer::flush() {
 	glEnable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_STENCIL_TEST);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glStencilMask(0xffffffff);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-	glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, 0);
 
 	m_impl->boundTexture = 0;
+	m_impl->stencilEnabled = false;
 	m_impl->stencilMaskVal = 0xffffffff;
 	m_impl->stencilFuncMode = GL_ALWAYS;
 	m_impl->stencilFuncRefVal = 0;
 	m_impl->stencilFuncMaskVal = 0xffffffff;
+	m_impl->blendState = Blend{};
 	m_impl->boundUniformOffset = -1;
 	m_impl->scissorEnabled = false;
 	m_impl->currentScissor[0] = -1;
@@ -1315,28 +1577,40 @@ void GL3Renderer::flush() {
 	m_impl->currentScissor[2] = -1;
 	m_impl->currentScissor[3] = -1;
 
-	// Upload UBO for fragment shaders (buffer orphaning avoids GPU sync stalls)
-	glBindBuffer(GL_UNIFORM_BUFFER, m_impl->fragBuf);
+	// Stream UBO via persistent ring buffer (zero per-frame GEM allocations)
 	size_t uboBytes = m_impl->uniforms.size();
-	if (uboBytes > m_impl->fragBufCap) {
-		m_impl->fragBufCap = uboBytes + 16384;
+	if (uboBytes > 0) {
+		glBindBuffer(GL_UNIFORM_BUFFER, m_impl->fragBuf);
+		if (m_impl->fragBufCap == 0 || m_impl->fragRingOffset + uboBytes > m_impl->fragBufCap) {
+			size_t minCap = (524288 / m_impl->fragSize) * m_impl->fragSize;
+			m_impl->fragBufCap = std::max(m_impl->fragBufCap, std::max(uboBytes * 4, minCap));
+			glBufferData(GL_UNIFORM_BUFFER, m_impl->fragBufCap, nullptr, GL_STREAM_DRAW);
+			m_impl->fragRingOffset = 0;
+		}
+		m_impl->baseUboOffset = static_cast<int>(m_impl->fragRingOffset);
+		glBufferSubData(GL_UNIFORM_BUFFER, m_impl->baseUboOffset, uboBytes, m_impl->uniforms.data());
+		m_impl->fragRingOffset += uboBytes;
 	}
-	glBufferData(GL_UNIFORM_BUFFER, m_impl->fragBufCap, nullptr, GL_STREAM_DRAW);
-	glBufferSubData(GL_UNIFORM_BUFFER, 0, uboBytes, m_impl->uniforms.data());
 
-	// Upload vertex data (buffer orphaning avoids GPU sync stalls)
+	// Stream VBO via persistent ring buffer (zero per-frame GEM allocations)
 	glBindVertexArray(m_impl->vertArr);
-	glBindBuffer(GL_ARRAY_BUFFER, m_impl->vertBuf);
-	size_t vertBytes = m_impl->verts.size() * sizeof(Vertex);
-	if (vertBytes > m_impl->vertBufCap) {
-		m_impl->vertBufCap = vertBytes + 65536;
+	int nverts = static_cast<int>(m_impl->verts.size());
+	size_t vertBytes = static_cast<size_t>(nverts) * sizeof(Vertex);
+	if (vertBytes > 0) {
+		glBindBuffer(GL_ARRAY_BUFFER, m_impl->vertBuf);
+		if (m_impl->vertBufCap == 0 || (static_cast<size_t>(m_impl->vertRingPos + nverts) * sizeof(Vertex)) > m_impl->vertBufCap) {
+			m_impl->vertBufCap = std::max(m_impl->vertBufCap, std::max(vertBytes * 4, static_cast<size_t>(262144) * sizeof(Vertex)));
+			glBufferData(GL_ARRAY_BUFFER, m_impl->vertBufCap, nullptr, GL_STREAM_DRAW);
+			m_impl->vertRingPos = 0;
+		}
+		m_impl->baseVertOffset = m_impl->vertRingPos;
+		glBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(m_impl->baseVertOffset) * sizeof(Vertex), vertBytes, m_impl->verts.data());
+		m_impl->vertRingPos += nverts;
 	}
-	glBufferData(GL_ARRAY_BUFFER, m_impl->vertBufCap, nullptr, GL_STREAM_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertBytes, m_impl->verts.data());
-	glUniform2fv(m_impl->shader.loc[LocViewSize], 1, m_impl->view);
 
 	int activeClipDepth = 0;
-	for (const auto& call : m_impl->calls) {
+	for (size_t idx = firstCallIdx; idx < m_impl->calls.size(); ++idx) {
+		const auto& call = m_impl->calls[idx];
 		m_impl->blendFuncSeparate(call.blendFunc);
 		bool needScissor = (call.scissorRect[0] >= 0);
 		if (m_impl->scissorEnabled != needScissor) {
@@ -1384,21 +1658,19 @@ void GL3Renderer::flush() {
 	}
 
 	if (activeClipDepth > 0) {
-		glEnable(GL_STENCIL_TEST);
-		glStencilMask(0x00);
-		glStencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
+		m_impl->enableStencil(true);
+		m_impl->stencilMask(0x00);
+		m_impl->stencilFunc(GL_EQUAL, activeClipDepth << 4, 0xf0);
 		glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-	} else {
-		glDisable(GL_STENCIL_TEST);
-		glStencilMask(0xffffffff);
-		glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-		glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
+	} else if (m_impl->stencilEnabled) {
+		m_impl->enableStencil(false);
 	}
 
-	glDisable(GL_SCISSOR_TEST);
-	glBindVertexArray(0);
+	if (m_impl->scissorEnabled) {
+		glDisable(GL_SCISSOR_TEST);
+		m_impl->scissorEnabled = false;
+	}
 	glDisable(GL_CULL_FACE);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	cancel();
 }
@@ -1621,25 +1893,16 @@ void GL3Renderer::renderFill(const Paint& paint, const CompositeOperationState& 
 		quad[2] = Vertex(bounds[0], bounds[3], 0.5f, 1.0f, c);
 		quad[3] = Vertex(bounds[0], bounds[1], 0.5f, 1.0f, c);
 		curOffset += 4;
+	}
 
-		call.uniformOffset = m_impl->allocFragUniforms(2);
-		FragUniforms* fragSimple = m_impl->fragUniformPtr(call.uniformOffset);
-		*fragSimple = FragUniforms{};
-		fragSimple->strokeThr = -1.0f;
-		fragSimple->type = ShaderSimple;
-
-		FragUniforms* fragFill = m_impl->fragUniformPtr(call.uniformOffset + m_impl->fragSize);
-		*fragFill = tempFrag;
+	if (m_impl->lastUniformOffset >= 0 && !m_impl->uniforms.empty() &&
+	    std::memcmp(m_impl->fragUniformPtr(m_impl->lastUniformOffset), &tempFrag, sizeof(FragUniforms)) == 0) {
+		call.uniformOffset = m_impl->lastUniformOffset;
 	} else {
-		if (m_impl->lastUniformOffset >= 0 && !m_impl->uniforms.empty() &&
-		    std::memcmp(m_impl->fragUniformPtr(m_impl->lastUniformOffset), &tempFrag, sizeof(FragUniforms)) == 0) {
-			call.uniformOffset = m_impl->lastUniformOffset;
-		} else {
-			call.uniformOffset = m_impl->allocFragUniforms(1);
-			FragUniforms* fragFill = m_impl->fragUniformPtr(call.uniformOffset);
-			*fragFill = tempFrag;
-			m_impl->lastUniformOffset = call.uniformOffset;
-		}
+		call.uniformOffset = m_impl->allocFragUniforms(1);
+		FragUniforms* fragFill = m_impl->fragUniformPtr(call.uniformOffset);
+		*fragFill = tempFrag;
+		m_impl->lastUniformOffset = call.uniformOffset;
 	}
 
 	m_impl->verts.resize(curOffset);
@@ -1846,18 +2109,61 @@ void GL3Renderer::renderTriangles(const Paint& paint, const CompositeOperationSt
 	bool hasHwScissor = m_impl->getHardwareScissor(scissor, hwScissor);
 
 	FragUniforms tempFrag;
-	m_impl->convertPaint(&tempFrag, paint, scissor, 1.0f, fringe, -1.0f, hasHwScissor);
-	if (shaderType >= 0) {
+	float widthForMult = (shaderType == -2) ? paint.feather : 1.0f;
+	m_impl->convertPaint(&tempFrag, paint, scissor, widthForMult, fringe, -1.0f, hasHwScissor);
+	if (shaderType == -2) {
+		tempFrag.type = ShaderSolid;
+		tempFrag.radius = 0.0f;
+		tempFrag.feather = 1.0f;
+		tempFrag.innerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+		tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	} else if (shaderType == 2) {
+		tempFrag.type = ShaderSimple;
+		tempFrag.innerCol = paint.innerColor.premultiplied();
+		tempFrag.outerCol = tempFrag.innerCol;
+	} else if (shaderType == 15) {
+		// Concentric Circle Radial Gradient (ftcoord in [-Rq, Rq], circle radius in paint.xform[0])
+		tempFrag.type = ShaderRadialGrad;
+		tempFrag.strokeMult = 4.0f;
+		tempFrag.strokeThr = paint.xform[0];
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
+	} else if (shaderType == 12) {
+		// Vertex-interpolated Radial Gradient (ftcoord = pt)
+		tempFrag.type = ShaderRadialGrad;
+		tempFrag.strokeMult = 3.0f;
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
+	} else if (shaderType == 13) {
+		// Vertex-interpolated Box Gradient (ftcoord = pt)
+		tempFrag.type = ShaderFillGrad;
+		tempFrag.strokeMult = 3.0f;
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
+	} else if (shaderType == 14) {
+		// Vertex-interpolated Linear Gradient (ftcoord.y = pt.y)
+		tempFrag.type = ShaderLinearGrad;
+		tempFrag.radius = 1.0f;
+		tempFrag.feather = 1.0f;
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
+	} else if (shaderType >= 0) {
 		tempFrag.type = shaderType;
 	}
-	if (shaderType == 3 && tempFrag.texType == 0 && paint.image != 0) {
-		Texture* tex = m_impl->findTexture(paint.image);
-		if (tex && tex->type == TextureType::Alpha) {
-			tempFrag.texType = 2;
-		}
-	}
 
-	if (shaderType == 7 || shaderType == 8) {
+	if (shaderType == 3) {
+		if (tempFrag.texType == 0 && paint.image != 0) {
+			Texture* tex = m_impl->findTexture(paint.image);
+			if (tex && tex->type == TextureType::Alpha) {
+				tempFrag.texType = 2;
+			}
+		}
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
+		tempFrag.extent[0] = 0.0f;
+		tempFrag.extent[1] = 0.0f;
+		tempFrag.radius = 0.0f;
+		tempFrag.feather = 1.0f;
+		if (paint.radius > 0.5f) {
+			tempFrag.innerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+			tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+		}
+	} else if (shaderType == 7 || shaderType == 8) {
 		tempFrag.innerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
 		tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
 	} else if (shaderType == 9) {
@@ -1869,11 +2175,32 @@ void GL3Renderer::renderTriangles(const Paint& paint, const CompositeOperationSt
 		tempFrag.strokeThr = paint.xform[1];
 		tempFrag.innerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
 		tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+		std::memset(tempFrag.paintMat, 0, sizeof(tempFrag.paintMat));
 	} else if (shaderType == 10) {
+		tempFrag.extent[0] = paint.extent[0];
+		tempFrag.extent[1] = paint.extent[1];
 		tempFrag.radius = paint.radius;
 		tempFrag.strokeThr = paint.feather;
 		tempFrag.innerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
 		tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	} else if (shaderType == 11) {
+		tempFrag.extent[0] = paint.extent[0];
+		tempFrag.extent[1] = paint.radius;
+		tempFrag.radius = paint.feather;
+		tempFrag.feather = paint.feather;
+		tempFrag.strokeMult = paint.feather;
+		tempFrag.strokeThr = paint.feather;
+	} else if (shaderType == 6) {
+		tempFrag.strokeMult = 2.0f;
+	} else if (shaderType == 1) {
+		if (paint.radius > 0.0f) {
+			tempFrag.radius = paint.radius;
+			tempFrag.extent[0] = paint.feather;
+			tempFrag.extent[1] = (paint.outerColor.r > 0.0f) ? paint.outerColor.r : paint.feather;
+			tempFrag.outerCol = Color(1.0f, 1.0f, 1.0f, 1.0f);
+			tempFrag.feather = 1.0f;
+			tempFrag.strokeMult = 1.0f;
+		}
 	}
 
 	if (!m_impl->calls.empty()) {

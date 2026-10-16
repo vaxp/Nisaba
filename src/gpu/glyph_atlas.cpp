@@ -11,6 +11,7 @@ SovereignGlyphAtlas::SovereignGlyphAtlas(int width, int height)
 void SovereignGlyphAtlas::reset() {
     std::fill(m_data.begin(), m_data.end(), 0);
     m_entries.clear();
+    m_fastTable.assign(kFastTableSize, FastEntry{});
     m_nodes.clear();
     m_nodes.push_back(SkylineNode{0, 0, m_width});
 
@@ -30,10 +31,15 @@ bool SovereignGlyphAtlas::resize(int newWidth, int newHeight) {
     return true;
 }
 
-const AtlasGlyphEntry* SovereignGlyphAtlas::find(const text::CacheKey& key) const noexcept {
+const AtlasGlyphEntry* SovereignGlyphAtlas::findSlow(const text::CacheKey& key) const noexcept {
     auto it = m_entries.find(key);
     if (it != m_entries.end()) {
-        return &it->second;
+        size_t idx = (static_cast<size_t>(key.glyph_id) * 16u +
+                      (static_cast<size_t>(key.x_bin) << 2) +
+                      static_cast<size_t>(key.y_bin) +
+                      (static_cast<size_t>(key.font_size_bits) * 2654435761u)) & (kFastTableSize - 1);
+        m_fastTable[idx] = FastEntry{key, it->second, true};
+        return &m_fastTable[idx].entry;
     }
     return nullptr;
 }
@@ -86,9 +92,14 @@ void SovereignGlyphAtlas::addSkylineLevel(size_t idx, int x, int y, int w, int h
 }
 
 std::optional<AtlasGlyphEntry> SovereignGlyphAtlas::insert(const text::CacheKey& key, const text::CachedGlyph* glyph) {
+    size_t fastIdx = (static_cast<size_t>(key.glyph_id) * 16u +
+                      (static_cast<size_t>(key.x_bin) << 2) +
+                      static_cast<size_t>(key.y_bin) +
+                      (static_cast<size_t>(key.font_size_bits) * 2654435761u)) & (kFastTableSize - 1);
     if (!glyph || glyph->width == 0 || glyph->height == 0 || glyph->data.empty()) {
         AtlasGlyphEntry emptyEntry{0.0f, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0};
         m_entries.emplace(key, emptyEntry);
+        m_fastTable[fastIdx] = FastEntry{key, emptyEntry, true};
         return emptyEntry;
     }
 
@@ -151,6 +162,7 @@ std::optional<AtlasGlyphEntry> SovereignGlyphAtlas::insert(const text::CacheKey&
     entry.height = static_cast<int>(glyph->height);
 
     auto [insertedIt, _] = m_entries.emplace(key, entry);
+    m_fastTable[fastIdx] = FastEntry{key, entry, true};
     return insertedIt->second;
 }
 

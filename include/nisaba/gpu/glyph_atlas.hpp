@@ -40,7 +40,17 @@ public:
     void reset();
 
     /// Looks up an existing entry in the atlas.
-    const AtlasGlyphEntry* find(const text::CacheKey& key) const noexcept;
+    const AtlasGlyphEntry* find(const text::CacheKey& key) const noexcept {
+        size_t idx = (static_cast<size_t>(key.glyph_id) * 16u +
+                      (static_cast<size_t>(key.x_bin) << 2) +
+                      static_cast<size_t>(key.y_bin) +
+                      (static_cast<size_t>(key.font_size_bits) * 2654435761u)) & (kFastTableSize - 1);
+        const FastEntry& fe = m_fastTable[idx];
+        if (fe.valid && fe.key == key) {
+            return &fe.entry;
+        }
+        return findSlow(key);
+    }
 
     /// Packs and stores a rasterized glyph mask into the atlas.
     /// Returns the allocated AtlasGlyphEntry, or std::nullopt if the atlas is full.
@@ -56,6 +66,15 @@ public:
     void flushToGpu(Renderer* renderer, int textureId);
 
 private:
+    static constexpr size_t kFastTableSize = 4096;
+    struct FastEntry {
+        text::CacheKey key{};
+        AtlasGlyphEntry entry{};
+        bool valid{false};
+    };
+
+    const AtlasGlyphEntry* findSlow(const text::CacheKey& key) const noexcept;
+
     struct SkylineNode {
         int x{0};
         int y{0};
@@ -70,6 +89,7 @@ private:
     std::vector<uint8_t> m_data;
     std::vector<SkylineNode> m_nodes;
     std::unordered_map<text::CacheKey, AtlasGlyphEntry, text::CacheKeyHash> m_entries;
+    mutable std::vector<FastEntry> m_fastTable{kFastTableSize};
 
     bool m_dirty{false};
     int m_dirtyMinX{0};

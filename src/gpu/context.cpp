@@ -956,14 +956,40 @@ void Context::circle(float cx, float cy, float r) {
 // -------------------------------------------------------------
 // Draw Operations (Fill & Stroke)
 // -------------------------------------------------------------
+namespace {
+struct UnitCircleLUT {
+	float cos48[49];
+	float sin48[49];
+	float cos32[33];
+	float sin32[33];
+	UnitCircleLUT() {
+		for (int i = 0; i <= 48; ++i) {
+			float a = (static_cast<float>(i) / 48.0f) * (2.0f * 3.14159265358979323846f);
+			cos48[i] = std::cos(a);
+			sin48[i] = std::sin(a);
+		}
+		for (int i = 0; i <= 32; ++i) {
+			float a = (static_cast<float>(i) / 32.0f) * (2.0f * 3.14159265358979323846f);
+			cos32[i] = std::cos(a);
+			sin32[i] = std::sin(a);
+		}
+	}
+};
+static const UnitCircleLUT g_circleLut;
+} // namespace
+
 void Context::fill() {
 	State& s = currentState();
 	Paint fillPaint = s.fill;
 
-	bool isConformal = (std::abs(s.xform[1]) < 1e-4f && std::abs(s.xform[2]) < 1e-4f &&
-	                    std::abs(s.xform[0] - s.xform[3]) < 1e-4f && s.xform[0] > 0.0f);
 	bool isAxisAligned = (std::abs(s.xform[1]) < 1e-4f && std::abs(s.xform[2]) < 1e-4f &&
 	                      s.xform[0] > 0.0f && s.xform[3] > 0.0f);
+	float det = s.xform[0] * s.xform[3] - s.xform[1] * s.xform[2];
+	bool isConformalRot = std::abs(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1] -
+	                               (s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3])) < 1e-4f &&
+	                      std::abs(s.xform[0] * s.xform[2] + s.xform[1] * s.xform[3]) < 1e-4f &&
+	                      det > 0.0f;
+
 	bool isSolid = (fillPaint.customShader == nullptr && fillPaint.image == 0 && fillPaint.extent[0] == 0.0f && fillPaint.extent[1] == 0.0f &&
 	                fillPaint.radius == 0.0f &&
 	                fillPaint.innerColor.r == fillPaint.outerColor.r &&
@@ -971,10 +997,63 @@ void Context::fill() {
 	                fillPaint.innerColor.b == fillPaint.outerColor.b &&
 	                fillPaint.innerColor.a == fillPaint.outerColor.a);
 
-	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleCircle && isConformal && isSolid) {
-		float sc = s.xform[0];
-		float cx = m_circleCx * sc + s.xform[4];
-		float cy = m_circleCy * sc + s.xform[5];
+	bool isRadialGrad = (fillPaint.customShader == nullptr && fillPaint.image == 0 &&
+	                     fillPaint.radius > 0.0f && fillPaint.extent[0] == fillPaint.radius && fillPaint.extent[1] == fillPaint.radius);
+	bool isLinearGrad = (fillPaint.customShader == nullptr && fillPaint.image == 0 &&
+	                     fillPaint.radius == 0.0f && fillPaint.extent[0] == 0.0f && fillPaint.extent[1] > 0.0f);
+	bool isImagePat   = (fillPaint.customShader == nullptr && fillPaint.image != 0);
+
+	Scissor noScissor{};
+	bool hasAxisAlignedScissor = (s.scissor.extent[0] >= 0.0f &&
+	                              std::abs(s.scissor.xform[1]) < 1e-4f && std::abs(s.scissor.xform[2]) < 1e-4f &&
+	                              s.scissor.xform[0] > 0.0f && s.scissor.xform[3] > 0.0f);
+	const Scissor& quadScissor = (s.scissor.extent[0] < 0.0f || hasAxisAlignedScissor) ? noScissor : s.scissor;
+
+	auto clipAxisAlignedQuadToScissor = [&](float& x0, float& y0, float& x1, float& y1,
+	                                        float& u0, float& v0, float& u1, float& v1) -> bool {
+		float sMinX = 0.0f;
+		float sMaxX = m_windowWidth;
+		float sMinY = 0.0f;
+		float sMaxY = m_windowHeight;
+		if (hasAxisAlignedScissor) {
+			float scx = s.scissor.xform[4];
+			float scy = s.scissor.xform[5];
+			float shw = s.scissor.extent[0] * s.scissor.xform[0];
+			float shh = s.scissor.extent[1] * s.scissor.xform[3];
+			sMinX = std::max(sMinX, scx - shw);
+			sMaxX = std::min(sMaxX, scx + shw);
+			sMinY = std::max(sMinY, scy - shh);
+			sMaxY = std::min(sMaxY, scy + shh);
+		}
+		if (x1 <= sMinX || x0 >= sMaxX || y1 <= sMinY || y0 >= sMaxY) {
+			return false;
+		}
+		float w = x1 - x0;
+		float h = y1 - y0;
+		if (w > 1e-4f && h > 1e-4f && (x0 < sMinX || x1 > sMaxX || y0 < sMinY || y1 > sMaxY)) {
+			float nx0 = std::max(x0, sMinX);
+			float nx1 = std::min(x1, sMaxX);
+			float ny0 = std::max(y0, sMinY);
+			float ny1 = std::min(y1, sMaxY);
+			float du = u1 - u0;
+			float dv = v1 - v0;
+			u0 = u0 + ((nx0 - x0) / w) * du;
+			u1 = u1 - ((x1 - nx1) / w) * du;
+			v0 = v0 + ((ny0 - y0) / h) * dv;
+			v1 = v1 - ((y1 - ny1) / h) * dv;
+			x0 = nx0;
+			x1 = nx1;
+			y0 = ny0;
+			y1 = ny1;
+		}
+		return true;
+	};
+
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleCircle && isConformalRot && (isSolid || isRadialGrad || isLinearGrad || isImagePat) && m_circleR > 0.0f) {
+		float sc = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
+		Point center = s.xform.transformPoint(m_circleCx, m_circleCy);
+		float cx = center.x;
+		float cy = center.y;
 		float r = m_circleR * sc;
 
 		fillPaint.innerColor.a *= s.alpha;
@@ -984,142 +1063,390 @@ void Context::fill() {
 		float scale = Rq / r;
 		uint32_t c = fillPaint.innerColor.premultiplied().toRGBA8();
 
+		float x0 = cx - Rq, y0 = cy - Rq, x1 = cx + Rq, y1 = cy + Rq;
 		Vertex quad[6];
-		// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
-		quad[0] = Vertex(cx - Rq, cy - Rq, -scale, -scale, c);
-		quad[1] = Vertex(cx - Rq, cy + Rq, -scale,  scale, c);
-		quad[2] = Vertex(cx + Rq, cy + Rq,  scale,  scale, c);
-		// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
-		quad[3] = Vertex(cx - Rq, cy - Rq, -scale, -scale, c);
-		quad[4] = Vertex(cx + Rq, cy + Rq,  scale,  scale, c);
-		quad[5] = Vertex(cx + Rq, cy - Rq,  scale, -scale, c);
+		if (isImagePat || isLinearGrad) {
+			float u0 = -Rq, v0 = -Rq, u1 = Rq, v1 = Rq;
+			if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+			quad[0] = Vertex(x0, y0, u0, v0, c);
+			quad[1] = Vertex(x0, y1, u0, v1, c);
+			quad[2] = Vertex(x1, y1, u1, v1, c);
+			quad[3] = Vertex(x0, y0, u0, v0, c);
+			quad[4] = Vertex(x1, y1, u1, v1, c);
+			quad[5] = Vertex(x1, y0, u1, v0, c);
+			fillPaint.xform.m[4] -= cx;
+			fillPaint.xform.m[5] -= cy;
+			if (isImagePat) {
+				fillPaint.radius = r;
+				fillPaint.feather = r;
+				fillPaint.outerColor.r = r;
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 1 /* ShaderFillImg */);
+			} else {
+				fillPaint.extent[0] = r;
+				fillPaint.radius = r;
+				fillPaint.feather = r;
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 11 /* ShaderRRectGradient */);
+			}
+			return;
+		}
 
-		m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 7 /* ShaderCircle */);
+		if (isRadialGrad &&
+		    std::abs(fillPaint.xform[4] - cx) < 1e-3f && std::abs(fillPaint.xform[5] - cy) < 1e-3f &&
+		    std::abs(fillPaint.xform[1]) < 1e-4f && std::abs(fillPaint.xform[2]) < 1e-4f &&
+		    std::abs(fillPaint.xform[0] - 1.0f) < 1e-4f && std::abs(fillPaint.xform[3] - 1.0f) < 1e-4f) {
+			float innerR = fillPaint.radius - fillPaint.feather * 0.5f;
+			// Hollow radial wave ring (innerColor == outerColor and innerR > 16):
+			// Skip the transparent interior disk [0, innerR] completely!
+			if (innerR > 16.0f &&
+			    fillPaint.innerColor.r == fillPaint.outerColor.r &&
+			    fillPaint.innerColor.g == fillPaint.outerColor.g &&
+			    fillPaint.innerColor.b == fillPaint.outerColor.b &&
+			    std::abs(fillPaint.innerColor.a - fillPaint.outerColor.a) < 1e-4f) {
+				m_textVertices.resize(32 * 6);
+				Vertex* dst = m_textVertices.data();
+				for (int i = 0; i < 32; ++i) {
+					float c0 = g_circleLut.cos32[i],     s0 = g_circleLut.sin32[i];
+					float c1 = g_circleLut.cos32[i + 1], s1 = g_circleLut.sin32[i + 1];
+					float ox0 = cx + r      * c0, oy0 = cy + r      * s0;
+					float ix0 = cx + innerR * c0, iy0 = cy + innerR * s0;
+					float ox1 = cx + r      * c1, oy1 = cy + r      * s1;
+					float ix1 = cx + innerR * c1, iy1 = cy + innerR * s1;
+					dst[0] = Vertex(ox0, oy0, ox0 - cx, oy0 - cy, c);
+					dst[1] = Vertex(ix0, iy0, ix0 - cx, iy0 - cy, c);
+					dst[2] = Vertex(ox1, oy1, ox1 - cx, oy1 - cy, c);
+					dst[3] = Vertex(ix0, iy0, ix0 - cx, iy0 - cy, c);
+					dst[4] = Vertex(ix1, iy1, ix1 - cx, iy1 - cy, c);
+					dst[5] = Vertex(ox1, oy1, ox1 - cx, oy1 - cy, c);
+					dst += 6;
+				}
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, m_textVertices.data(), 32 * 6, m_fringeWidth, 12 /* Vertex-interpolated RadialGrad */);
+				return;
+			}
+			// Concentric radial gradient on circle: ftcoord = local position in pixels (u in [-Rq, Rq])
+			// Encode r in paintMat[0] so all concentric circles with same radius & gradient coalesce into 1 draw call!
+			float u0 = -Rq, v0 = -Rq, u1 = Rq, v1 = Rq;
+			if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+			quad[0] = Vertex(x0, y0, u0, v0, c);
+			quad[1] = Vertex(x0, y1, u0, v1, c);
+			quad[2] = Vertex(x1, y1, u1, v1, c);
+			quad[3] = Vertex(x0, y0, u0, v0, c);
+			quad[4] = Vertex(x1, y1, u1, v1, c);
+			quad[5] = Vertex(x1, y0, u1, v0, c);
+			fillPaint.xform = Transform2D::identity();
+			fillPaint.xform.m[0] = r;
+			m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 15 /* Concentric Circle RadialGrad */);
+			return;
+		}
+
+		float u0 = -scale, v0 = -scale, u1 = scale, v1 = scale;
+		if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+
+		// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
+		quad[0] = Vertex(x0, y0, u0, v0, c);
+		quad[1] = Vertex(x0, y1, u0, v1, c);
+		quad[2] = Vertex(x1, y1, u1, v1, c);
+		// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
+		quad[3] = Vertex(x0, y0, u0, v0, c);
+		quad[4] = Vertex(x1, y1, u1, v1, c);
+		quad[5] = Vertex(x1, y0, u1, v0, c);
+
+		int sType = isSolid ? 7 /* ShaderCircle */ : 6 /* ShaderRadialGrad */;
+		m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, sType);
 		return;
 	}
 
-	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleEllipse && isAxisAligned && isSolid && m_ellipseRx > 0.0f && m_ellipseRy > 0.0f) {
-		float sx = s.xform[0];
-		float sy = s.xform[3];
-		float cx = m_ellipseCx * sx + s.xform[4];
-		float cy = m_ellipseCy * sy + s.xform[5];
-		float rx = m_ellipseRx * sx;
-		float ry = m_ellipseRy * sy;
-
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleEllipse && det > 1e-6f && isSolid && m_ellipseRx > 0.0f && m_ellipseRy > 0.0f) {
 		fillPaint.innerColor.a *= s.alpha;
 		fillPaint.outerColor.a *= s.alpha;
-
 		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
-		float fx = fringe;
-		float fy = fringe;
-
-		float Rqx = rx + fx;
-		float Rqy = ry + fy;
-		float scaleX = Rqx / rx;
-		float scaleY = Rqy / ry;
 		uint32_t c = fillPaint.innerColor.premultiplied().toRGBA8();
 
-		Vertex quad[6];
-		// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
-		quad[0] = Vertex(cx - Rqx, cy - Rqy, -scaleX, -scaleY, c);
-		quad[1] = Vertex(cx - Rqx, cy + Rqy, -scaleX,  scaleY, c);
-		quad[2] = Vertex(cx + Rqx, cy + Rqy,  scaleX,  scaleY, c);
-		// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
-		quad[3] = Vertex(cx - Rqx, cy - Rqy, -scaleX, -scaleY, c);
-		quad[4] = Vertex(cx + Rqx, cy + Rqy,  scaleX,  scaleY, c);
-		quad[5] = Vertex(cx + Rqx, cy - Rqy,  scaleX, -scaleY, c);
+		if (isAxisAligned) {
+			float sx = s.xform[0];
+			float sy = s.xform[3];
+			float cx = m_ellipseCx * sx + s.xform[4];
+			float cy = m_ellipseCy * sy + s.xform[5];
+			float rx = m_ellipseRx * sx;
+			float ry = m_ellipseRy * sy;
+			float Rqx = rx + fringe;
+			float Rqy = ry + fringe;
+			float scaleX = Rqx / rx;
+			float scaleY = Rqy / ry;
 
-		m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 7 /* ShaderCircle */);
-		return;
+			float x0 = cx - Rqx, y0 = cy - Rqy, x1 = cx + Rqx, y1 = cy + Rqy;
+			float u0 = -scaleX, v0 = -scaleY, u1 = scaleX, v1 = scaleY;
+			if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+
+			Vertex quad[6];
+			quad[0] = Vertex(x0, y0, u0, v0, c);
+			quad[1] = Vertex(x0, y1, u0, v1, c);
+			quad[2] = Vertex(x1, y1, u1, v1, c);
+			quad[3] = Vertex(x0, y0, u0, v0, c);
+			quad[4] = Vertex(x1, y1, u1, v1, c);
+			quad[5] = Vertex(x1, y0, u1, v0, c);
+
+			m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 7 /* ShaderCircle */);
+			return;
+		} else {
+			float col0 = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
+			float col1 = std::sqrt(s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3]);
+			float fx = (fringe > 0.0f) ? (fringe * col1 / det) : 0.0f;
+			float fy = (fringe > 0.0f) ? (fringe * col0 / det) : 0.0f;
+
+			float Rqx = m_ellipseRx + fx;
+			float Rqy = m_ellipseRy + fy;
+			float scaleX = Rqx / m_ellipseRx;
+			float scaleY = Rqy / m_ellipseRy;
+
+			Point p0 = s.xform.transformPoint(m_ellipseCx - Rqx, m_ellipseCy - Rqy);
+			Point p1 = s.xform.transformPoint(m_ellipseCx + Rqx, m_ellipseCy - Rqy);
+			Point p2 = s.xform.transformPoint(m_ellipseCx + Rqx, m_ellipseCy + Rqy);
+			Point p3 = s.xform.transformPoint(m_ellipseCx - Rqx, m_ellipseCy + Rqy);
+
+			Vertex quad[6] = {
+				Vertex(p0.x, p0.y, -scaleX, -scaleY, c),
+				Vertex(p3.x, p3.y, -scaleX,  scaleY, c),
+				Vertex(p2.x, p2.y,  scaleX,  scaleY, c),
+				Vertex(p0.x, p0.y, -scaleX, -scaleY, c),
+				Vertex(p2.x, p2.y,  scaleX,  scaleY, c),
+				Vertex(p1.x, p1.y,  scaleX, -scaleY, c)
+			};
+
+			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 7 /* ShaderCircle */);
+			return;
+		}
 	}
 
-	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleRect && isAxisAligned && m_rectW > 0.0f && m_rectH > 0.0f) {
-		float sx = s.xform[0];
-		float sy = s.xform[3];
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleRect && det > 1e-6f && m_rectW > 0.0f && m_rectH > 0.0f) {
 		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
-		float fx = fringe / sx;
-		float fy = fringe / sy;
-
-		float xA = m_rectX - fx;
-		float xB = m_rectX + m_rectW + fx;
-		float yA = m_rectY - fy;
-		float yB = m_rectY + m_rectH + fy;
-
-		Point p0 = s.xform.transformPoint(xA, yA);
-		Point p1 = s.xform.transformPoint(xB, yA);
-		Point p2 = s.xform.transformPoint(xB, yB);
-		Point p3 = s.xform.transformPoint(xA, yB);
-
 		fillPaint.innerColor.a *= s.alpha;
 		fillPaint.outerColor.a *= s.alpha;
 		uint32_t c = fillPaint.innerColor.premultiplied().toRGBA8();
 
-		bool coversViewport = (s.scissor.extent[0] < 0.0f) &&
-		                      (p0.x <= 0.0f && p0.y <= 0.0f && p2.x >= m_windowWidth && p2.y >= m_windowHeight);
+		if (isAxisAligned) {
+			float sx = s.xform[0];
+			float sy = s.xform[3];
+			float fx = fringe / sx;
+			float fy = fringe / sy;
 
-		if (isSolid && (fringe <= 0.0f || coversViewport)) {
-			Vertex quad[6];
-			quad[0] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[1] = Vertex(p3.x, p3.y, 0.5f, 1.0f, c);
-			quad[2] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[3] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
-			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 4 /* ShaderSolid */);
-			return;
-		}
+			float xA = m_rectX - fx;
+			float xB = m_rectX + m_rectW + fx;
+			float yA = m_rectY - fy;
+			float yB = m_rectY + m_rectH + fy;
 
-		if (fillPaint.customShader != nullptr) {
-			Vertex quad[6];
-			quad[0] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[1] = Vertex(p3.x, p3.y, 0.5f, 1.0f, c);
-			quad[2] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[3] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
-			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, -1 /* derive from paint */);
-			return;
-		}
+			Point p0 = s.xform.transformPoint(xA, yA);
+			Point p1 = s.xform.transformPoint(xB, yA);
+			Point p2 = s.xform.transformPoint(xB, yB);
+			Point p3 = s.xform.transformPoint(xA, yB);
 
-		if (!isSolid && coversViewport) {
-			Vertex quad[6];
-			quad[0] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[1] = Vertex(p3.x, p3.y, 0.5f, 1.0f, c);
-			quad[2] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[3] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
-			quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
-			quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
-			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, -1 /* derive from paint */);
-			return;
-		}
+			bool coversViewport = (s.scissor.extent[0] < 0.0f) &&
+			                      (p0.x <= 0.0f && p0.y <= 0.0f && p2.x >= m_windowWidth && p2.y >= m_windowHeight);
 
-		if (isSolid) {
+			if (isSolid && (fringe <= 0.0f || coversViewport)) {
+				float x0 = p0.x, y0 = p0.y, x1 = p2.x, y1 = p2.y;
+				float u0 = 0.5f, v0 = 1.0f, u1 = 0.5f, v1 = 1.0f;
+				if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+				Vertex quad[6];
+				quad[0] = Vertex(x0, y0, 0.5f, 1.0f, c);
+				quad[1] = Vertex(x0, y1, 0.5f, 1.0f, c);
+				quad[2] = Vertex(x1, y1, 0.5f, 1.0f, c);
+				quad[3] = Vertex(x0, y0, 0.5f, 1.0f, c);
+				quad[4] = Vertex(x1, y1, 0.5f, 1.0f, c);
+				quad[5] = Vertex(x1, y0, 0.5f, 1.0f, c);
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 2 /* ShaderSimple (uses innerCol) */);
+				return;
+			}
+
+			if (fillPaint.customShader != nullptr) {
+				Vertex quad[6];
+				quad[0] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
+				quad[1] = Vertex(p3.x, p3.y, 0.5f, 1.0f, c);
+				quad[2] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
+				quad[3] = Vertex(p0.x, p0.y, 0.5f, 1.0f, c);
+				quad[4] = Vertex(p2.x, p2.y, 0.5f, 1.0f, c);
+				quad[5] = Vertex(p1.x, p1.y, 0.5f, 1.0f, c);
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, -1 /* derive from paint */);
+				return;
+			}
+
+			if (!isSolid) {
+				float x0 = m_rectX * sx + s.xform[4];
+				float y0 = m_rectY * sy + s.xform[5];
+				float x1 = (m_rectX + m_rectW) * sx + s.xform[4];
+				float y1 = (m_rectY + m_rectH) * sy + s.xform[5];
+				float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+				if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) return;
+
+				Transform2D invxform;
+				fillPaint.xform.inverse(invxform);
+
+				if (isLinearGrad) {
+					float invFeather = (fillPaint.feather > 1e-4f) ? (1.0f / fillPaint.feather) : 1.0f;
+					auto evalY = [&](float px, float py) {
+						return (invxform[1] * px + invxform[3] * py + invxform[5]) * invFeather;
+					};
+					float g00 = evalY(x0, y0);
+					float g01 = evalY(x0, y1);
+					float g11 = evalY(x1, y1);
+					float g10 = evalY(x1, y0);
+					Vertex quad[6] = {
+						Vertex(x0, y0, 0.5f, g00, c),
+						Vertex(x0, y1, 0.5f, g01, c),
+						Vertex(x1, y1, 0.5f, g11, c),
+						Vertex(x0, y0, 0.5f, g00, c),
+						Vertex(x1, y1, 0.5f, g11, c),
+						Vertex(x1, y0, 0.5f, g10, c)
+					};
+					m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 14 /* Vertex-interpolated LinearGrad */);
+					return;
+				}
+
+				if (isRadialGrad) {
+					if (fillPaint.outerColor.a == 0.0f &&
+					    s.compositeOperation.dstRGB != BlendFactor::Zero &&
+					    std::abs(fillPaint.xform[1]) < 1e-4f && std::abs(fillPaint.xform[2]) < 1e-4f &&
+					    std::abs(fillPaint.xform[0] - 1.0f) < 1e-4f && std::abs(fillPaint.xform[3] - 1.0f) < 1e-4f) {
+						float rcx = fillPaint.xform[4];
+						float rcy = fillPaint.xform[5];
+						float R = fillPaint.radius + fillPaint.feather * 0.5f;
+						if (x0 <= rcx - R && x1 >= rcx + R && y0 <= rcy - R && y1 >= rcy + R) {
+							// Tight circumscribed 12-gon (dodecagon) eliminates 98.2% of empty corner overdraw!
+							// tan(15 deg) = 0.26794919f, sec(15 deg) = 1.03527618f
+							float t1 = 0.26794919f * R;
+							float t2 = 0.76732699f * R;
+							float uvX[12] = { -t1,  t1,  t2,  R,  R,  t2,  t1, -t1, -t2, -R, -R, -t2 };
+							float uvY[12] = { -R,  -R,  -t2, -t1, t1, t2,  R,   R,   t2,  t1, -t1, -t2 };
+							Vertex tris[30];
+							for (int k = 0; k < 10; ++k) {
+								tris[k * 3 + 0] = Vertex(rcx + uvX[0],     rcy + uvY[0],     uvX[0],     uvY[0],     c);
+								tris[k * 3 + 1] = Vertex(rcx + uvX[k + 2], rcy + uvY[k + 2], uvX[k + 2], uvY[k + 2], c);
+								tris[k * 3 + 2] = Vertex(rcx + uvX[k + 1], rcy + uvY[k + 1], uvX[k + 1], uvY[k + 1], c);
+							}
+							m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, tris, 30, m_fringeWidth, 12 /* Vertex-interpolated RadialGrad */);
+							return;
+						}
+						x0 = std::max(x0, rcx - R);
+						x1 = std::min(x1, rcx + R);
+						y0 = std::max(y0, rcy - R);
+						y1 = std::min(y1, rcy + R);
+						if (x0 >= x1 || y0 >= y1) return;
+					}
+					Point pt00 = invxform.transformPoint(x0, y0);
+					Point pt01 = invxform.transformPoint(x0, y1);
+					Point pt11 = invxform.transformPoint(x1, y1);
+					Point pt10 = invxform.transformPoint(x1, y0);
+					Vertex quad[6] = {
+						Vertex(x0, y0, pt00.x, pt00.y, c),
+						Vertex(x0, y1, pt01.x, pt01.y, c),
+						Vertex(x1, y1, pt11.x, pt11.y, c),
+						Vertex(x0, y0, pt00.x, pt00.y, c),
+						Vertex(x1, y1, pt11.x, pt11.y, c),
+						Vertex(x1, y0, pt10.x, pt10.y, c)
+					};
+					m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 12 /* Vertex-interpolated RadialGrad */);
+					return;
+				}
+
+				if (isImagePat) {
+					float invExtX = (fillPaint.extent[0] > 1e-4f) ? (1.0f / fillPaint.extent[0]) : 1.0f;
+					float invExtY = (fillPaint.extent[1] > 1e-4f) ? (1.0f / fillPaint.extent[1]) : 1.0f;
+					Transform2D uvXform = invxform.multiply(Transform2D::scale(invExtX, invExtY));
+					Point uv00 = uvXform.transformPoint(x0, y0);
+					Point uv01 = uvXform.transformPoint(x0, y1);
+					Point uv11 = uvXform.transformPoint(x1, y1);
+					Point uv10 = uvXform.transformPoint(x1, y0);
+					Vertex quad[6] = {
+						Vertex(x0, y0, uv00.x, uv00.y, c),
+						Vertex(x0, y1, uv01.x, uv01.y, c),
+						Vertex(x1, y1, uv11.x, uv11.y, c),
+						Vertex(x0, y0, uv00.x, uv00.y, c),
+						Vertex(x1, y1, uv11.x, uv11.y, c),
+						Vertex(x1, y0, uv10.x, uv10.y, c)
+					};
+					fillPaint.radius = 1.0f;
+					m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 3 /* ShaderImg */);
+					return;
+				}
+
+				// Box Gradient
+				Point pt00 = invxform.transformPoint(x0, y0);
+				Point pt01 = invxform.transformPoint(x0, y1);
+				Point pt11 = invxform.transformPoint(x1, y1);
+				Point pt10 = invxform.transformPoint(x1, y0);
+				Vertex quad[6] = {
+					Vertex(x0, y0, pt00.x, pt00.y, c),
+					Vertex(x0, y1, pt01.x, pt01.y, c),
+					Vertex(x1, y1, pt11.x, pt11.y, c),
+					Vertex(x0, y0, pt00.x, pt00.y, c),
+					Vertex(x1, y1, pt11.x, pt11.y, c),
+					Vertex(x1, y0, pt10.x, pt10.y, c)
+				};
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 13 /* Vertex-interpolated BoxGrad */);
+				return;
+			}
+
+			if (isSolid) {
+				float uA = (fringe > 0.0f) ? (-1.0f - (2.0f * fx) / m_rectW) : -1.0f;
+				float uB = (fringe > 0.0f) ? ( 1.0f + (2.0f * fx) / m_rectW) :  1.0f;
+				float vA = (fringe > 0.0f) ? (-1.0f - (2.0f * fy) / m_rectH) : -1.0f;
+				float vB = (fringe > 0.0f) ? ( 1.0f + (2.0f * fy) / m_rectH) :  1.0f;
+
+				float x0 = p0.x, y0 = p0.y, x1 = p2.x, y1 = p2.y;
+				if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, uA, vA, uB, vB)) return;
+
+				Vertex quad[6];
+				quad[0] = Vertex(x0, y0, uA, vA, c);
+				quad[1] = Vertex(x0, y1, uA, vB, c);
+				quad[2] = Vertex(x1, y1, uB, vB, c);
+				quad[3] = Vertex(x0, y0, uA, vA, c);
+				quad[4] = Vertex(x1, y1, uB, vB, c);
+				quad[5] = Vertex(x1, y0, uB, vA, c);
+
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, quadScissor, quad, 6, m_fringeWidth, 8 /* ShaderRect */);
+				return;
+			}
+		} else if (isSolid) {
+			// General affine-transformed solid rectangle (rotated, scaled, or skewed)
+			float col0 = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
+			float col1 = std::sqrt(s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3]);
+			float fx = (fringe > 0.0f) ? (fringe * col1 / det) : 0.0f;
+			float fy = (fringe > 0.0f) ? (fringe * col0 / det) : 0.0f;
+
+			float xA = m_rectX - fx;
+			float xB = m_rectX + m_rectW + fx;
+			float yA = m_rectY - fy;
+			float yB = m_rectY + m_rectH + fy;
+
 			float uA = (fringe > 0.0f) ? (-1.0f - (2.0f * fx) / m_rectW) : -1.0f;
 			float uB = (fringe > 0.0f) ? ( 1.0f + (2.0f * fx) / m_rectW) :  1.0f;
 			float vA = (fringe > 0.0f) ? (-1.0f - (2.0f * fy) / m_rectH) : -1.0f;
 			float vB = (fringe > 0.0f) ? ( 1.0f + (2.0f * fy) / m_rectH) :  1.0f;
 
-			Vertex quad[6];
-			// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
-			quad[0] = Vertex(p0.x, p0.y, uA, vA, c);
-			quad[1] = Vertex(p3.x, p3.y, uA, vB, c);
-			quad[2] = Vertex(p2.x, p2.y, uB, vB, c);
-			// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
-			quad[3] = Vertex(p0.x, p0.y, uA, vA, c);
-			quad[4] = Vertex(p2.x, p2.y, uB, vB, c);
-			quad[5] = Vertex(p1.x, p1.y, uB, vA, c);
+			Point p0 = s.xform.transformPoint(xA, yA);
+			Point p1 = s.xform.transformPoint(xB, yA);
+			Point p2 = s.xform.transformPoint(xB, yB);
+			Point p3 = s.xform.transformPoint(xA, yB);
+
+			Vertex quad[6] = {
+				Vertex(p0.x, p0.y, uA, vA, c),
+				Vertex(p3.x, p3.y, uA, vB, c),
+				Vertex(p2.x, p2.y, uB, vB, c),
+				Vertex(p0.x, p0.y, uA, vA, c),
+				Vertex(p2.x, p2.y, uB, vB, c),
+				Vertex(p1.x, p1.y, uB, vA, c)
+			};
 
 			m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 8 /* ShaderRect */);
 			return;
 		}
 	}
 
-	if (m_renderer->backendType() == GpuBackendType::OpenGL && (m_singleRRect || m_singleVaryingRRect) && isConformal && isSolid && m_rrectW > 0.0f && m_rrectH > 0.0f) {
-		float sc = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
-		if (sc < 1e-6f) sc = 1.0f;
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && (m_singleRRect || m_singleVaryingRRect) && det > 1e-6f && (isSolid || (m_singleRRect && (isLinearGrad || isImagePat))) && m_rrectW > 0.0f && m_rrectH > 0.0f) {
+		float col0 = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
+		float col1 = std::sqrt(s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3]);
 		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
-		float fx = (fringe > 0.0f) ? (fringe / sc) : 0.0f;
-		float fy = fx;
+		float fx = (fringe > 0.0f) ? (fringe * col1 / det) : 0.0f;
+		float fy = (fringe > 0.0f) ? (fringe * col0 / det) : 0.0f;
 
 		float hw = m_rrectW * 0.5f;
 		float hh = m_rrectH * 0.5f;
@@ -1138,34 +1465,126 @@ void Context::fill() {
 		float vA = -hh - fy;
 		float vB =  hh + fy;
 
-		Point p0 = s.xform.transformPoint(xA, yA);
-		Point p1 = s.xform.transformPoint(xB, yA);
-		Point p2 = s.xform.transformPoint(xB, yB);
-		Point p3 = s.xform.transformPoint(xA, yB);
-
 		fillPaint.innerColor.a *= s.alpha;
 		fillPaint.outerColor.a *= s.alpha;
 		uint32_t c = fillPaint.innerColor.premultiplied().toRGBA8();
 
 		Vertex quad[6];
-		// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
-		quad[0] = Vertex(p0.x, p0.y, uA, vA, c);
-		quad[1] = Vertex(p3.x, p3.y, uA, vB, c);
-		quad[2] = Vertex(p2.x, p2.y, uB, vB, c);
-		// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
-		quad[3] = Vertex(p0.x, p0.y, uA, vA, c);
-		quad[4] = Vertex(p2.x, p2.y, uB, vB, c);
-		quad[5] = Vertex(p1.x, p1.y, uB, vA, c);
+		const Scissor* effScissor = &s.scissor;
+		if (isAxisAligned) {
+			float x0 = xA * s.xform[0] + s.xform[4];
+			float y0 = yA * s.xform[3] + s.xform[5];
+			float x1 = xB * s.xform[0] + s.xform[4];
+			float y1 = yB * s.xform[3] + s.xform[5];
+			if (!clipAxisAlignedQuadToScissor(x0, y0, x1, y1, uA, vA, uB, vB)) return;
+			quad[0] = Vertex(x0, y0, uA, vA, c);
+			quad[1] = Vertex(x0, y1, uA, vB, c);
+			quad[2] = Vertex(x1, y1, uB, vB, c);
+			quad[3] = Vertex(x0, y0, uA, vA, c);
+			quad[4] = Vertex(x1, y1, uB, vB, c);
+			quad[5] = Vertex(x1, y0, uB, vA, c);
+			effScissor = &quadScissor;
+		} else {
+			Point p0 = s.xform.transformPoint(xA, yA);
+			Point p1 = s.xform.transformPoint(xB, yA);
+			Point p2 = s.xform.transformPoint(xB, yB);
+			Point p3 = s.xform.transformPoint(xA, yB);
+			quad[0] = Vertex(p0.x, p0.y, uA, vA, c);
+			quad[1] = Vertex(p3.x, p3.y, uA, vB, c);
+			quad[2] = Vertex(p2.x, p2.y, uB, vB, c);
+			quad[3] = Vertex(p0.x, p0.y, uA, vA, c);
+			quad[4] = Vertex(p2.x, p2.y, uB, vB, c);
+			quad[5] = Vertex(p1.x, p1.y, uB, vA, c);
+		}
 
-		fillPaint.extent[0] = hw;
-		fillPaint.extent[1] = hh;
-		fillPaint.radius = radTL;
-		fillPaint.feather = radTR;
-		fillPaint.xform[0] = radBR;
-		fillPaint.xform[1] = radBL;
+		if (isSolid) {
+			fillPaint.extent[0] = hw;
+			fillPaint.extent[1] = hh;
+			fillPaint.radius = radTL;
+			fillPaint.feather = radTR;
+			fillPaint.xform[0] = radBR;
+			fillPaint.xform[1] = radBL;
+			m_renderer->renderTriangles(fillPaint, s.compositeOperation, *effScissor, quad, 6, m_fringeWidth, 9 /* ShaderRRect */);
+			return;
+		} else if (isLinearGrad || isImagePat) {
+			Transform2D localToScreen = Transform2D::translate(m_rrectX + hw, m_rrectY + hh).multiply(s.xform);
+			Transform2D screenToLocal;
+			localToScreen.inverse(screenToLocal);
+			fillPaint.xform = fillPaint.xform.multiply(screenToLocal);
+			if (isLinearGrad) {
+				fillPaint.extent[0] = hw;
+				fillPaint.radius = hh;
+				fillPaint.feather = m_rrectR;
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, *effScissor, quad, 6, m_fringeWidth, 11 /* ShaderRRectGradient */);
+				return;
+			} else {
+				float u0 = -hw - fx, v0 = -hh - fy, u1 = hw + fx, v1 = hh + fy;
+				float x0 = xA * s.xform[0] + s.xform[4];
+				float y0 = yA * s.xform[3] + s.xform[5];
+				float x1 = xB * s.xform[0] + s.xform[4];
+				float y1 = yB * s.xform[3] + s.xform[5];
+				if (isAxisAligned && clipAxisAlignedQuadToScissor(x0, y0, x1, y1, u0, v0, u1, v1)) {
+					float R = m_rrectR;
+					float cx = (m_rrectX + hw) * s.xform[0] + s.xform[4];
+					float cy = (m_rrectY + hh) * s.xform[3] + s.xform[5];
+					// If large rounded rect with small corners (e.g. Suite 64: 880x560, r=20), split interior & 4 corners!
+					if (m_rrectW > 4.0f * R && m_rrectH > 4.0f * R && u0 <= -hw && u1 >= hw && v0 <= -hh && v1 >= hh) {
+						Transform2D invPaint;
+						s.fill.xform.inverse(invPaint);
+						float invExtX = (s.fill.extent[0] > 1e-4f) ? (1.0f / s.fill.extent[0]) : 1.0f;
+						float invExtY = (s.fill.extent[1] > 1e-4f) ? (1.0f / s.fill.extent[1]) : 1.0f;
+						Transform2D uvXform = invPaint.multiply(Transform2D::scale(invExtX, invExtY));
+						auto emitTexQuad = [&](Vertex* dst, float qx0, float qy0, float qx1, float qy1) {
+							Point uv00 = uvXform.transformPoint(qx0, qy0);
+							Point uv01 = uvXform.transformPoint(qx0, qy1);
+							Point uv11 = uvXform.transformPoint(qx1, qy1);
+							Point uv10 = uvXform.transformPoint(qx1, qy0);
+							dst[0] = Vertex(qx0, qy0, uv00.x, uv00.y, c);
+							dst[1] = Vertex(qx0, qy1, uv01.x, uv01.y, c);
+							dst[2] = Vertex(qx1, qy1, uv11.x, uv11.y, c);
+							dst[3] = Vertex(qx0, qy0, uv00.x, uv00.y, c);
+							dst[4] = Vertex(qx1, qy1, uv11.x, uv11.y, c);
+							dst[5] = Vertex(qx1, qy0, uv10.x, uv10.y, c);
+						};
+						float ix0 = cx - hw + R, ix1 = cx + hw - R;
+						float iy0 = cy - hh,     iy1 = cy + hh;
+						float ly0 = cy - hh + R, ly1 = cy + hh - R;
+						Vertex bodyVerts[18];
+						emitTexQuad(&bodyVerts[0],  ix0, iy0, ix1, iy1);
+						emitTexQuad(&bodyVerts[6],  cx - hw, ly0, ix0, ly1);
+						emitTexQuad(&bodyVerts[12], ix1, ly0, cx + hw, ly1);
+						Paint bodyPaint = fillPaint;
+						bodyPaint.radius = 1.0f;
+						m_renderer->renderTriangles(bodyPaint, s.compositeOperation, *effScissor, bodyVerts, 18, m_fringeWidth, 3 /* ShaderImg */);
 
-		m_renderer->renderTriangles(fillPaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 9 /* ShaderRRect */);
-		return;
+						// 4 rounded corners with ShaderFillImg (only 4 * (R x R) pixels instead of 880x560!)
+						Vertex cornerVerts[24];
+						auto emitCorner = [&](int idx, float cu0, float cv0, float cu1, float cv1) {
+							cornerVerts[idx + 0] = Vertex(cx + cu0, cy + cv0, cu0, cv0, c);
+							cornerVerts[idx + 1] = Vertex(cx + cu0, cy + cv1, cu0, cv1, c);
+							cornerVerts[idx + 2] = Vertex(cx + cu1, cy + cv1, cu1, cv1, c);
+							cornerVerts[idx + 3] = Vertex(cx + cu0, cy + cv0, cu0, cv0, c);
+							cornerVerts[idx + 4] = Vertex(cx + cu1, cy + cv1, cu1, cv1, c);
+							cornerVerts[idx + 5] = Vertex(cx + cu1, cy + cv0, cu1, cv0, c);
+						};
+						emitCorner(0,  -hw - fx, -hh - fy, -hw + R,  -hh + R);
+						emitCorner(6,   hw - R,  -hh - fy,  hw + fx, -hh + R);
+						emitCorner(12,  hw - R,   hh - R,   hw + fx,  hh + fy);
+						emitCorner(18, -hw - fx,  hh - R,  -hw + R,   hh + fy);
+						fillPaint.radius = m_rrectR;
+						fillPaint.feather = hw;
+						fillPaint.outerColor.r = hh;
+						m_renderer->renderTriangles(fillPaint, s.compositeOperation, *effScissor, cornerVerts, 24, m_fringeWidth, 1 /* ShaderFillImg */);
+						return;
+					}
+				}
+				fillPaint.radius = m_rrectR;
+				fillPaint.feather = hw;
+				fillPaint.outerColor.r = hh;
+				m_renderer->renderTriangles(fillPaint, s.compositeOperation, *effScissor, quad, 6, m_fringeWidth, 1 /* ShaderFillImg */);
+				return;
+			}
+		}
 	}
 
 	materializePending();
@@ -1218,7 +1637,8 @@ void Context::stroke() {
 
 	bool isConformal = std::abs(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1] -
 	                            (s.xform[2] * s.xform[2] + s.xform[3] * s.xform[3])) < 1e-4f &&
-	                   std::abs(s.xform[0] * s.xform[2] + s.xform[1] * s.xform[3]) < 1e-4f;
+	                   std::abs(s.xform[0] * s.xform[2] + s.xform[1] * s.xform[3]) < 1e-4f &&
+	                   (s.xform[0] * s.xform[3] - s.xform[1] * s.xform[2]) > 0.0f;
 	bool isSolid = (strokePaint.customShader == nullptr && strokePaint.image == 0 && strokePaint.extent[0] == 0.0f && strokePaint.extent[1] == 0.0f &&
 	                strokePaint.radius == 0.0f &&
 	                strokePaint.innerColor.r == strokePaint.outerColor.r &&
@@ -1229,28 +1649,228 @@ void Context::stroke() {
 	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleCircle && isConformal && isSolid && m_circleR > 0.0f) {
 		float sc = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
 		float rScreen = m_circleR * sc;
-		if (rScreen <= 50.0f || rScreen <= strokeW * 3.0f) {
-			Point pCenter = s.xform.transformPoint(m_circleCx, m_circleCy);
-			float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
-			float halfStroke = strokeW * 0.5f;
-			float Rquad = rScreen + halfStroke + fringe;
+		Point pCenter = s.xform.transformPoint(m_circleCx, m_circleCy);
+		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
+		float halfStroke = strokeW * 0.5f;
+		uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
 
-			uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
+		if (rScreen <= 40.0f || rScreen <= strokeW * 3.0f) {
+			float Rquad = rScreen + halfStroke + fringe;
+			strokePaint.radius = rScreen;
+			strokePaint.feather = halfStroke;
 
 			Vertex quad[6];
-			// Triangle 1 (p0 -> p3 -> p2: CCW in NDC)
 			quad[0] = Vertex(pCenter.x - Rquad, pCenter.y - Rquad, -Rquad, -Rquad, c);
 			quad[1] = Vertex(pCenter.x - Rquad, pCenter.y + Rquad, -Rquad,  Rquad, c);
 			quad[2] = Vertex(pCenter.x + Rquad, pCenter.y + Rquad,  Rquad,  Rquad, c);
-			// Triangle 2 (p0 -> p2 -> p1: CCW in NDC)
 			quad[3] = Vertex(pCenter.x - Rquad, pCenter.y - Rquad, -Rquad, -Rquad, c);
 			quad[4] = Vertex(pCenter.x + Rquad, pCenter.y + Rquad,  Rquad,  Rquad, c);
 			quad[5] = Vertex(pCenter.x + Rquad, pCenter.y - Rquad,  Rquad, -Rquad, c);
 
-			strokePaint.radius = rScreen;
-			strokePaint.feather = halfStroke;
-
 			m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 10 /* ShaderRing */);
+			return;
+		} else {
+			// Direct precomputed LUT triangle ring for large circles (zero interior overdraw, zero sqrt/trig)
+			float hw = halfStroke + fringe * 0.5f;
+			float rOut = rScreen + hw;
+			float rIn  = std::max(0.0f, rScreen - hw);
+			m_textVertices.resize(48 * 6);
+			Vertex* dst = m_textVertices.data();
+			for (int i = 0; i < 48; ++i) {
+				float c0 = g_circleLut.cos48[i],     s0 = g_circleLut.sin48[i];
+				float c1 = g_circleLut.cos48[i + 1], s1 = g_circleLut.sin48[i + 1];
+				float ox0 = pCenter.x + rOut * c0, oy0 = pCenter.y + rOut * s0;
+				float ix0 = pCenter.x + rIn  * c0, iy0 = pCenter.y + rIn  * s0;
+				float ox1 = pCenter.x + rOut * c1, oy1 = pCenter.y + rOut * s1;
+				float ix1 = pCenter.x + rIn  * c1, iy1 = pCenter.y + rIn  * s1;
+				dst[0] = Vertex(ox0, oy0, 0.0f, 1.0f, c);
+				dst[1] = Vertex(ix0, iy0, 1.0f, 1.0f, c);
+				dst[2] = Vertex(ox1, oy1, 0.0f, 1.0f, c);
+				dst[3] = Vertex(ix0, iy0, 1.0f, 1.0f, c);
+				dst[4] = Vertex(ix1, iy1, 1.0f, 1.0f, c);
+				dst[5] = Vertex(ox1, oy1, 0.0f, 1.0f, c);
+				dst += 6;
+			}
+			strokePaint.feather = strokeW;
+			m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, m_textVertices.data(), 48 * 6, m_fringeWidth, -2 /* Fast-path Stroked Solid */);
+			return;
+		}
+	}
+
+	bool isAxisAligned = (std::abs(s.xform[1]) < 1e-4f && std::abs(s.xform[2]) < 1e-4f &&
+	                      s.xform[0] > 0.0f && s.xform[3] > 0.0f);
+
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleEllipse && isAxisAligned && isSolid && m_ellipseRx > 0.0f && m_ellipseRy > 0.0f) {
+		float sx = s.xform[0];
+		float sy = s.xform[3];
+		float cx = m_ellipseCx * sx + s.xform[4];
+		float cy = m_ellipseCy * sy + s.xform[5];
+		float rx = m_ellipseRx * sx;
+		float ry = m_ellipseRy * sy;
+		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
+		float halfStroke = strokeW * 0.5f;
+		float Rqx = rx + halfStroke + fringe;
+		float Rqy = ry + halfStroke + fringe;
+		float scaleX = Rqx / rx;
+		float scaleY = Rqy / ry;
+		uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
+
+		strokePaint.extent[0] = -rx; // Negative extent[0] signals Stroked Ellipse in ShaderRing!
+		strokePaint.extent[1] = ry;
+		strokePaint.radius = 1.0f;
+		strokePaint.feather = halfStroke;
+
+		Vertex quad[6] = {
+			Vertex(cx - Rqx, cy - Rqy, -scaleX, -scaleY, c),
+			Vertex(cx - Rqx, cy + Rqy, -scaleX,  scaleY, c),
+			Vertex(cx + Rqx, cy + Rqy,  scaleX,  scaleY, c),
+			Vertex(cx - Rqx, cy - Rqy, -scaleX, -scaleY, c),
+			Vertex(cx + Rqx, cy + Rqy,  scaleX,  scaleY, c),
+			Vertex(cx + Rqx, cy - Rqy,  scaleX, -scaleY, c)
+		};
+		m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 10 /* ShaderRing */);
+		return;
+	}
+
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleRect && isAxisAligned && isSolid && s.lineJoin == LineJoin::Miter && m_rectW > 0.0f && m_rectH > 0.0f) {
+		float sx = s.xform[0];
+		float sy = s.xform[3];
+		float x0 = m_rectX * sx + s.xform[4];
+		float y0 = m_rectY * sy + s.xform[5];
+		float x1 = (m_rectX + m_rectW) * sx + s.xform[4];
+		float y1 = (m_rectY + m_rectH) * sy + s.xform[5];
+		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
+		float hw = strokeW * 0.5f + fringe * 0.5f;
+		if ((x1 - x0) > 2.0f * hw && (y1 - y0) > 2.0f * hw) {
+			uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
+			float ox[4] = {x0 - hw, x0 - hw, x1 + hw, x1 + hw};
+			float oy[4] = {y0 - hw, y1 + hw, y1 + hw, y0 - hw};
+			float ix[4] = {x0 + hw, x0 + hw, x1 - hw, x1 - hw};
+			float iy[4] = {y0 + hw, y1 - hw, y1 - hw, y0 + hw};
+			Vertex verts[24];
+			for (int i = 0; i < 4; ++i) {
+				int j = (i + 1) & 3;
+				verts[i * 6 + 0] = Vertex(ox[i], oy[i], 0.0f, 1.0f, c);
+				verts[i * 6 + 1] = Vertex(ix[i], iy[i], 1.0f, 1.0f, c);
+				verts[i * 6 + 2] = Vertex(ox[j], oy[j], 0.0f, 1.0f, c);
+				verts[i * 6 + 3] = Vertex(ix[i], iy[i], 1.0f, 1.0f, c);
+				verts[i * 6 + 4] = Vertex(ix[j], iy[j], 1.0f, 1.0f, c);
+				verts[i * 6 + 5] = Vertex(ox[j], oy[j], 0.0f, 1.0f, c);
+			}
+			strokePaint.feather = strokeW;
+			m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, verts, 24, m_fringeWidth, -2 /* Fast-path Stroked Solid */);
+			return;
+		}
+	}
+
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && m_singleRRect && isConformal && isSolid && m_rrectW > 0.0f && m_rrectH > 0.0f) {
+		float sc = std::sqrt(s.xform[0] * s.xform[0] + s.xform[1] * s.xform[1]);
+		if (sc < 1e-6f) sc = 1.0f;
+		float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
+		float halfStroke = strokeW * 0.5f;
+		float expand = (halfStroke + fringe) / sc;
+
+		float hw = m_rrectW * 0.5f;
+		float hh = m_rrectH * 0.5f;
+		float cx = m_rrectX + hw;
+		float cy = m_rrectY + hh;
+
+		float uOutX = hw + expand;
+		float uOutY = hh + expand;
+		float uInX = hw - expand - m_rrectR * 0.3f;
+		float uInY = hh - expand - m_rrectR * 0.3f;
+
+		uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
+		strokePaint.extent[0] = hw * sc;
+		strokePaint.extent[1] = hh * sc;
+		strokePaint.radius = m_rrectR * sc;
+		strokePaint.feather = halfStroke;
+
+		if (uInX > 4.0f && uInY > 4.0f) {
+			Vertex quads[24];
+			auto emitQuad = [&](int idx, float u0, float v0, float u1, float v1) {
+				Point p0 = s.xform.transformPoint(cx + u0, cy + v0);
+				Point p1 = s.xform.transformPoint(cx + u1, cy + v0);
+				Point p2 = s.xform.transformPoint(cx + u1, cy + v1);
+				Point p3 = s.xform.transformPoint(cx + u0, cy + v1);
+				float su0 = u0 * sc, sv0 = v0 * sc, su1 = u1 * sc, sv1 = v1 * sc;
+				quads[idx + 0] = Vertex(p0.x, p0.y, su0, sv0, c);
+				quads[idx + 1] = Vertex(p3.x, p3.y, su0, sv1, c);
+				quads[idx + 2] = Vertex(p2.x, p2.y, su1, sv1, c);
+				quads[idx + 3] = Vertex(p0.x, p0.y, su0, sv0, c);
+				quads[idx + 4] = Vertex(p2.x, p2.y, su1, sv1, c);
+				quads[idx + 5] = Vertex(p1.x, p1.y, su1, sv0, c);
+			};
+			emitQuad(0,  -uOutX, -uOutY,  uOutX, -uInY);
+			emitQuad(6,  -uOutX,  uInY,   uOutX,  uOutY);
+			emitQuad(12, -uOutX, -uInY,  -uInX,   uInY);
+			emitQuad(18,  uInX,  -uInY,   uOutX,  uInY);
+			m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, quads, 24, m_fringeWidth, 10 /* ShaderRing */);
+			return;
+		} else {
+			Point p0 = s.xform.transformPoint(cx - uOutX, cy - uOutY);
+			Point p1 = s.xform.transformPoint(cx + uOutX, cy - uOutY);
+			Point p2 = s.xform.transformPoint(cx + uOutX, cy + uOutY);
+			Point p3 = s.xform.transformPoint(cx - uOutX, cy + uOutY);
+			float suOutX = uOutX * sc, suOutY = uOutY * sc;
+			Vertex quad[6];
+			quad[0] = Vertex(p0.x, p0.y, -suOutX, -suOutY, c);
+			quad[1] = Vertex(p3.x, p3.y, -suOutX,  suOutY, c);
+			quad[2] = Vertex(p2.x, p2.y,  suOutX,  suOutY, c);
+			quad[3] = Vertex(p0.x, p0.y, -suOutX, -suOutY, c);
+			quad[4] = Vertex(p2.x, p2.y,  suOutX,  suOutY, c);
+			quad[5] = Vertex(p1.x, p1.y,  suOutX, -suOutY, c);
+			m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, quad, 6, m_fringeWidth, 10 /* ShaderRing */);
+			return;
+		}
+	}
+
+	// Fast-path for disjoint line segments (MoveTo + LineTo pairs, Butt/Square cap): bypass Tessellator
+	if (m_renderer->backendType() == GpuBackendType::OpenGL && isSolid && !m_commands.empty() &&
+	    (m_commands.size() % 2 == 0) && (s.lineCap == LineCap::Butt || s.lineCap == LineCap::Square)) {
+		bool allSegments = true;
+		int numSegs = static_cast<int>(m_commands.size() / 2);
+		for (int i = 0; i < numSegs; ++i) {
+			if (m_commands[i * 2 + 0].type != PathCommandType::MoveTo ||
+			    m_commands[i * 2 + 1].type != PathCommandType::LineTo) {
+				allSegments = false;
+				break;
+			}
+		}
+		if (allSegments) {
+			float fringe = (m_renderer->edgeAntiAlias() && s.shapeAntiAlias) ? m_fringeWidth : 0.0f;
+			float hw = strokeW * 0.5f + fringe * 0.5f;
+			float capExt = (s.lineCap == LineCap::Square) ? (strokeW * 0.5f) : 0.0f;
+			uint32_t c = strokePaint.innerColor.premultiplied().toRGBA8();
+			m_textVertices.resize(numSegs * 6);
+			Vertex* dst = m_textVertices.data();
+			int validVerts = 0;
+			for (int i = 0; i < numSegs; ++i) {
+				float x0 = m_commands[i * 2 + 0].p0.x, y0 = m_commands[i * 2 + 0].p0.y;
+				float x1 = m_commands[i * 2 + 1].p0.x, y1 = m_commands[i * 2 + 1].p0.y;
+				float dx = x1 - x0, dy = y1 - y0;
+				float len2 = dx * dx + dy * dy;
+				if (len2 < 1e-8f) continue;
+				float invLen = 1.0f / std::sqrt(len2);
+				float ux = dx * invLen, uy = dy * invLen;
+				float nx = -uy * hw, ny = ux * hw;
+				if (capExt > 0.0f) {
+					x0 -= ux * capExt; y0 -= uy * capExt;
+					x1 += ux * capExt; y1 += uy * capExt;
+				}
+				dst[0] = Vertex(x0 + nx, y0 + ny, 0.0f, 1.0f, c);
+				dst[1] = Vertex(x0 - nx, y0 - ny, 1.0f, 1.0f, c);
+				dst[2] = Vertex(x1 + nx, y1 + ny, 0.0f, 1.0f, c);
+				dst[3] = Vertex(x0 - nx, y0 - ny, 1.0f, 1.0f, c);
+				dst[4] = Vertex(x1 - nx, y1 - ny, 1.0f, 1.0f, c);
+				dst[5] = Vertex(x1 + nx, y1 + ny, 0.0f, 1.0f, c);
+				dst += 6;
+				validVerts += 6;
+			}
+			if (validVerts > 0) {
+				strokePaint.feather = strokeW;
+				m_renderer->renderTriangles(strokePaint, s.compositeOperation, s.scissor, m_textVertices.data(), validVerts, m_fringeWidth, -2 /* Fast-path Stroked Solid */);
+			}
 			return;
 		}
 	}
@@ -1422,17 +2042,6 @@ const text::TtfFont* Context::resolveGlyphFont(int primaryFontId, char32_t cp, u
 	return primary;
 }
 
-struct MeasuredGlyph {
-	const text::TtfFont* font{nullptr};
-	uint32_t fontId{0};
-	uint16_t glyphId{0};
-	float x{0.0f};
-	float y{0.0f};
-	float advance{0.0f};
-	float scale{1.0f};
-	const char* str{nullptr};
-};
-
 static inline bool isStringPureAscii(const char* str, const char* end) noexcept {
 	for (const char* p = str; p < end; ++p) {
 		if (static_cast<unsigned char>(*p) >= 128) return false;
@@ -1440,7 +2049,7 @@ static inline bool isStringPureAscii(const char* str, const char* end) noexcept 
 	return true;
 }
 
-std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
+const std::vector<Context::MeasuredGlyph>& Context::layoutGlyphsInternal(
 	const State& s,
 	const text::TtfFont* primaryFont,
 	uint32_t fontId,
@@ -1450,10 +2059,10 @@ std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
 	const char* end,
 	float* outTotalWidth) const {
 
-	std::vector<MeasuredGlyph> glyphs;
+	m_measuredGlyphs.clear();
 	if (!string || string == end || !primaryFont) {
 		if (outTotalWidth) *outTotalWidth = 0.0f;
-		return glyphs;
+		return m_measuredGlyphs;
 	}
 
 	float scale = primaryFont->scale_for_size(scaledSize);
@@ -1462,7 +2071,7 @@ std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
 	float letterSpace = s.letterSpacing * (fontSize > 0.0f ? (scaledSize / fontSize) : 1.0f);
 
 	if (isStringPureAscii(string, end)) {
-		glyphs.reserve(end - string);
+		m_measuredGlyphs.reserve(end - string);
 		for (const char* p = string; p < end; ++p) {
 			uint8_t c = static_cast<uint8_t>(*p);
 			uint16_t gid = primaryFont->ascii_glyph_index(c);
@@ -1494,7 +2103,7 @@ std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
 			mg.advance = adv;
 			mg.scale = scale;
 			mg.str = p;
-			glyphs.push_back(mg);
+			m_measuredGlyphs.push_back(mg);
 
 			curX += adv + letterSpace;
 		}
@@ -1503,7 +2112,7 @@ std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
 		auto bidiRuns = text::Bidi::segment_runs(sv);
 		auto shaped = text::Bidi::shape_text(sv, bidiRuns);
 
-		glyphs.reserve(shaped.size());
+		m_measuredGlyphs.reserve(shaped.size());
 		for (const auto& sc : shaped) {
 			uint16_t gid = 0;
 			const text::TtfFont* font = resolveGlyphFont(static_cast<int>(fontId), sc.codepoint, &gid);
@@ -1530,17 +2139,17 @@ std::vector<MeasuredGlyph> Context::layoutGlyphsInternal(
 			mg.advance = adv;
 			mg.scale = fScale;
 			mg.str = string + sc.byte_index;
-			glyphs.push_back(mg);
+			m_measuredGlyphs.push_back(mg);
 
 			curX += adv + letterSpace;
 		}
 	}
 
 	if (outTotalWidth) *outTotalWidth = curX;
-	return glyphs;
+	return m_measuredGlyphs;
 }
 
-std::vector<MeasuredGlyph> Context::layoutGlyphs(
+const std::vector<Context::MeasuredGlyph>& Context::layoutGlyphs(
 	const State& s,
 	float scaledSize,
 	const char* string,
@@ -1548,8 +2157,9 @@ std::vector<MeasuredGlyph> Context::layoutGlyphs(
 	float* outTotalWidth) const {
 
 	if (s.fontId <= 0) {
+		m_measuredGlyphs.clear();
 		if (outTotalWidth) *outTotalWidth = 0.0f;
-		return {};
+		return m_measuredGlyphs;
 	}
 	const text::TtfFont* primaryFont = m_fontSystem.get_font(static_cast<uint32_t>(s.fontId));
 	return layoutGlyphsInternal(s, primaryFont, static_cast<uint32_t>(s.fontId), scaledSize, s.fontSize, string, end, outTotalWidth);
@@ -1598,7 +2208,7 @@ float Context::text(float x, float y, const char* string, const char* end) {
 	if (!primaryFont) return x;
 
 	float totalWidth = 0.0f;
-	auto glyphs = layoutGlyphs(s, scaledSize, string, end, &totalWidth);
+	const auto& glyphs = layoutGlyphs(s, scaledSize, string, end, &totalWidth);
 	if (glyphs.empty()) return x;
 
 	float alignX = 0.0f, alignY = 0.0f;
@@ -1607,6 +2217,11 @@ float Context::text(float x, float y, const char* string, const char* end) {
 	float startX = x * scale + alignX;
 	float baselineY = y * scale + alignY;
 	bool isFlipped = isTransformFlipped(s.xform);
+	bool isIdentity = s.xform.isIdentity() && (invscale == 1.0f);
+
+	Color textCol = s.fill.innerColor;
+	textCol.a *= s.alpha;
+	uint32_t vcol = textCol.premultiplied().toRGBA8();
 
 	m_textVertices.clear();
 	m_textVertices.reserve(glyphs.size() * 6);
@@ -1632,15 +2247,13 @@ float Context::text(float x, float y, const char* string, const char* end) {
 
 			auto inserted = m_atlas->insert(key, cg);
 			if (!inserted) {
-				// Atlas is full, flush current batch and expand or reset atlas
 				if (!m_textVertices.empty()) {
 					m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
 					Paint p = s.fill;
 					p.image = m_fontTextureId;
-					p.innerColor.a *= s.alpha;
-					p.outerColor.a *= s.alpha;
+					p.radius = 1.0f;
 					m_renderer->renderTriangles(p, s.compositeOperation, s.scissor,
-					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
+					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth, 3);
 					m_textVertices.clear();
 				}
 				if (m_renderer) {
@@ -1666,44 +2279,60 @@ float Context::text(float x, float y, const char* string, const char* end) {
 
 		if (!entry || entry->width == 0 || entry->height == 0) continue;
 
-		float qx0 = static_cast<float>(intX + entry->offsetX) * invscale;
-		float qy0 = static_cast<float>(intY + entry->offsetY) * invscale;
-		float qx1 = qx0 + static_cast<float>(entry->width) * invscale;
-		float qy1 = qy0 + static_cast<float>(entry->height) * invscale;
-
 		float u0 = entry->u0;
 		float v0 = entry->v0;
 		float u1 = entry->u1;
 		float v1 = entry->v1;
 
-		if (isFlipped) {
-			std::swap(qy0, qy1);
-			std::swap(v0, v1);
+		if (isIdentity) {
+			float qx0 = static_cast<float>(intX + entry->offsetX);
+			float qy0 = static_cast<float>(intY + entry->offsetY);
+			float qx1 = qx0 + static_cast<float>(entry->width);
+			float qy1 = qy0 + static_cast<float>(entry->height);
+
+			m_textVertices.emplace_back(qx0, qy0, u0, v0, vcol);
+			m_textVertices.emplace_back(qx1, qy1, u1, v1, vcol);
+			m_textVertices.emplace_back(qx1, qy0, u1, v0, vcol);
+
+			m_textVertices.emplace_back(qx0, qy0, u0, v0, vcol);
+			m_textVertices.emplace_back(qx0, qy1, u0, v1, vcol);
+			m_textVertices.emplace_back(qx1, qy1, u1, v1, vcol);
+		} else {
+			float qx0 = static_cast<float>(intX + entry->offsetX) * invscale;
+			float qy0 = static_cast<float>(intY + entry->offsetY) * invscale;
+			float qx1 = qx0 + static_cast<float>(entry->width) * invscale;
+			float qy1 = qy0 + static_cast<float>(entry->height) * invscale;
+
+			if (isFlipped) {
+				std::swap(qy0, qy1);
+				std::swap(v0, v1);
+			}
+
+			Point c0 = s.xform.transformPoint(qx0, qy0);
+			Point c1 = s.xform.transformPoint(qx1, qy0);
+			Point c2 = s.xform.transformPoint(qx1, qy1);
+			Point c3 = s.xform.transformPoint(qx0, qy1);
+
+			m_textVertices.emplace_back(c0.x, c0.y, u0, v0, vcol);
+			m_textVertices.emplace_back(c2.x, c2.y, u1, v1, vcol);
+			m_textVertices.emplace_back(c1.x, c1.y, u1, v0, vcol);
+
+			m_textVertices.emplace_back(c0.x, c0.y, u0, v0, vcol);
+			m_textVertices.emplace_back(c3.x, c3.y, u0, v1, vcol);
+			m_textVertices.emplace_back(c2.x, c2.y, u1, v1, vcol);
 		}
-
-		Point c0 = s.xform.transformPoint(qx0, qy0);
-		Point c1 = s.xform.transformPoint(qx1, qy0);
-		Point c2 = s.xform.transformPoint(qx1, qy1);
-		Point c3 = s.xform.transformPoint(qx0, qy1);
-
-		m_textVertices.emplace_back(c0.x, c0.y, u0, v0);
-		m_textVertices.emplace_back(c2.x, c2.y, u1, v1);
-		m_textVertices.emplace_back(c1.x, c1.y, u1, v0);
-
-		m_textVertices.emplace_back(c0.x, c0.y, u0, v0);
-		m_textVertices.emplace_back(c3.x, c3.y, u0, v1);
-		m_textVertices.emplace_back(c2.x, c2.y, u1, v1);
 	}
 
-	m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
+	if (m_atlas->isDirty()) {
+		m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
+	}
 
 	if (!m_textVertices.empty()) {
 		Paint p = s.fill;
 		p.image = m_fontTextureId;
-		p.innerColor.a *= s.alpha;
-		p.outerColor.a *= s.alpha;
+		p.radius = 1.0f;
 		m_renderer->renderTriangles(p, s.compositeOperation, s.scissor,
-		                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
+		                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth, 3);
 	}
 
 	return x + totalWidth * invscale;
@@ -1721,7 +2350,7 @@ float Context::textWithFont(float x, float y, const text::TtfFont& font, float f
 
 	float totalWidth = 0.0f;
 	uint32_t fontId = (static_cast<uint32_t>(std::hash<const text::TtfFont*>{}(&font)) & 0x7FFFFFFFu) | 0x80000000u;
-	auto glyphs = layoutGlyphsInternal(s, &font, fontId, scaledSize, fontSize, string, end, &totalWidth);
+	const auto& glyphs = layoutGlyphsInternal(s, &font, fontId, scaledSize, fontSize, string, end, &totalWidth);
 	if (glyphs.empty()) return x;
 
 	float alignX = 0.0f, alignY = 0.0f;
@@ -1730,6 +2359,10 @@ float Context::textWithFont(float x, float y, const text::TtfFont& font, float f
 	float startX = x * scale + alignX;
 	float baselineY = y * scale + alignY;
 	bool isFlipped = isTransformFlipped(s.xform);
+
+	Color textCol = s.fill.innerColor;
+	textCol.a *= s.alpha;
+	uint32_t vcol = textCol.premultiplied().toRGBA8();
 
 	m_textVertices.clear();
 	m_textVertices.reserve(glyphs.size() * 6);
@@ -1759,10 +2392,9 @@ float Context::textWithFont(float x, float y, const text::TtfFont& font, float f
 					m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
 					Paint p = s.fill;
 					p.image = m_fontTextureId;
-					p.innerColor.a *= s.alpha;
-					p.outerColor.a *= s.alpha;
+					p.radius = 1.0f;
 					m_renderer->renderTriangles(p, s.compositeOperation, s.scissor,
-					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
+					                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth, 3);
 					m_textVertices.clear();
 				}
 				if (m_renderer) {
@@ -1808,24 +2440,25 @@ float Context::textWithFont(float x, float y, const text::TtfFont& font, float f
 		Point c2 = s.xform.transformPoint(qx1, qy1);
 		Point c3 = s.xform.transformPoint(qx0, qy1);
 
-		m_textVertices.emplace_back(c0.x, c0.y, u0, v0);
-		m_textVertices.emplace_back(c2.x, c2.y, u1, v1);
-		m_textVertices.emplace_back(c1.x, c1.y, u1, v0);
+		m_textVertices.emplace_back(c0.x, c0.y, u0, v0, vcol);
+		m_textVertices.emplace_back(c2.x, c2.y, u1, v1, vcol);
+		m_textVertices.emplace_back(c1.x, c1.y, u1, v0, vcol);
 
-		m_textVertices.emplace_back(c0.x, c0.y, u0, v0);
-		m_textVertices.emplace_back(c3.x, c3.y, u0, v1);
-		m_textVertices.emplace_back(c2.x, c2.y, u1, v1);
+		m_textVertices.emplace_back(c0.x, c0.y, u0, v0, vcol);
+		m_textVertices.emplace_back(c3.x, c3.y, u0, v1, vcol);
+		m_textVertices.emplace_back(c2.x, c2.y, u1, v1, vcol);
 	}
 
-	m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
+	if (m_atlas->isDirty()) {
+		m_atlas->flushToGpu(m_renderer.get(), m_fontTextureId);
+	}
 
 	if (!m_textVertices.empty()) {
 		Paint p = s.fill;
 		p.image = m_fontTextureId;
-		p.innerColor.a *= s.alpha;
-		p.outerColor.a *= s.alpha;
+		p.radius = 1.0f;
 		m_renderer->renderTriangles(p, s.compositeOperation, s.scissor,
-		                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth);
+		                           m_textVertices.data(), static_cast<int>(m_textVertices.size()), m_fringeWidth, 3);
 	}
 
 	return x + totalWidth * invscale;

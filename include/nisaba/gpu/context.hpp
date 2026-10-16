@@ -186,9 +186,20 @@ private:
 	std::unordered_map<std::string, int> m_fontNames;
 	std::unordered_map<int, std::vector<int>> m_fallbacks;
 
+	struct MeasuredGlyph {
+		const text::TtfFont* font{nullptr};
+		uint32_t fontId{0};
+		uint16_t glyphId{0};
+		float x{0.0f};
+		float y{0.0f};
+		float advance{0.0f};
+		float scale{1.0f};
+		const char* str{nullptr};
+	};
+
 	const text::TtfFont* resolveGlyphFont(int primaryFontId, char32_t cp, uint16_t* outGlyphId) const;
-	std::vector<struct MeasuredGlyph> layoutGlyphsInternal(const State& s, const text::TtfFont* primaryFont, uint32_t fontId, float scaledSize, float fontSize, const char* string, const char* end, float* outTotalWidth) const;
-	std::vector<struct MeasuredGlyph> layoutGlyphs(const State& s, float scaledSize, const char* string, const char* end, float* outTotalWidth) const;
+	const std::vector<MeasuredGlyph>& layoutGlyphsInternal(const State& s, const text::TtfFont* primaryFont, uint32_t fontId, float scaledSize, float fontSize, const char* string, const char* end, float* outTotalWidth) const;
+	const std::vector<MeasuredGlyph>& layoutGlyphs(const State& s, float scaledSize, const char* string, const char* end, float* outTotalWidth) const;
 
 	std::vector<State> m_states;
 	std::vector<PathCommand> m_commands;
@@ -205,6 +216,7 @@ private:
 
 	mutable std::vector<RenderPath> m_renderPaths;
 	mutable std::vector<Vertex> m_textVertices;
+	mutable std::vector<MeasuredGlyph> m_measuredGlyphs;
 	bool m_singleCircle{false};
 	float m_circleCx{0.0f};
 	float m_circleCy{0.0f};

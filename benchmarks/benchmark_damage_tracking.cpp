@@ -256,7 +256,7 @@ BenchmarkResult run_micro_pulse_test(size_t frame_count, BenchmarkMode mode) {
     frame_times.reserve(frame_count);
 
     const auto cursor_rect = *Rect::from_xywh(450.0f, 200.0f, 4.0f, 20.0f);
-    nisaba::damage::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
+    nisaba::vspr::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
     std::vector<ScreenIntRect> damage_rects;
 
     for (size_t i = 0; i < frame_count; ++i) {
@@ -306,7 +306,7 @@ BenchmarkResult run_sub_component_test(size_t frame_count, BenchmarkMode mode) {
     frame_times.reserve(frame_count);
 
     const auto counter_rect = *Rect::from_xywh(955.0f, 195.0f, 190.0f, 35.0f);
-    nisaba::damage::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
+    nisaba::vspr::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
     std::vector<ScreenIntRect> damage_rects;
 
     for (size_t i = 0; i < frame_count; ++i) {
@@ -357,7 +357,7 @@ BenchmarkResult run_multi_zone_test(size_t frame_count, BenchmarkMode mode) {
     const auto r_clock = *Rect::from_xywh(RealisticDashboardScene::WIDTH - 120.0f, 20.0f, 105.0f, 24.0f);
     const auto r_led = *Rect::from_xywh(50.0f, 150.0f, 25.0f, 25.0f);
 
-    nisaba::damage::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
+    nisaba::vspr::TiledSpanTracker<16> tracker(RealisticDashboardScene::WIDTH, RealisticDashboardScene::HEIGHT);
     std::vector<ScreenIntRect> damage_rects;
 
     for (size_t i = 0; i < frame_count; ++i) {
