@@ -21,7 +21,7 @@
 #include "nisaba/gpu/gpu_device.hpp"
 #include "nisaba/gpu/gpu_surface.hpp"
 #include "nisaba/gpu/gpu_canvas.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 
 #ifdef NISABA_HAS_BACKEND_OS
 #  include "nisaba/backend_os/platform.hpp"
@@ -36,7 +36,7 @@
 #endif
 
 using namespace nisaba;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 
 using nisaba::gpu::GpuCanvas;
 using nisaba::gpu::GpuSurface;

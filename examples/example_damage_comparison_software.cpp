@@ -17,7 +17,7 @@
 #include <memory>
 
 #include "nisaba/nisaba.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 
 #ifdef NISABA_HAS_BACKEND_OS
 #  include "nisaba/backend_os/platform.hpp"
@@ -33,7 +33,7 @@
 
 using namespace nisaba;
 using namespace nisaba::text;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 
 // -----------------------------------------------------------------------------
 // Display Configuration Constants

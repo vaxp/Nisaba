@@ -7,10 +7,10 @@
 
 #include "nisaba/math/rect.hpp"
 #include "nisaba/math/screen_int_rect.hpp"
-#include "nisaba/damage/types.hpp"
-#include "nisaba/damage/tiled_span_tracker.hpp"
+#include "nisaba/vspr/types.hpp"
+#include "nisaba/vspr/tiled_span_tracker.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief Strategy selected by Adaptive Invalidation.
 enum class InvalidationStrategy : uint8_t {
@@ -139,4 +139,4 @@ private:
     std::vector<Rect> child_damages_;
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

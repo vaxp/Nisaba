@@ -2,10 +2,10 @@
 #include <cassert>
 #include <vector>
 #include "nisaba/nisaba.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 
 using namespace nisaba;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 
 void test_span_basic() {
     std::cout << "[Test] Span Basics ... ";

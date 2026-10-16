@@ -6,7 +6,7 @@
 #include "nisaba/math/screen_int_rect.hpp"
 #include "nisaba/math/rect.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief Represents a single horizontal pixel span [x0, x1) on scanline y.
 struct Span {
@@ -36,4 +36,4 @@ struct DamageRegion {
     constexpr explicit DamageRegion(ScreenIntRect b) noexcept : bounds(b) {}
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

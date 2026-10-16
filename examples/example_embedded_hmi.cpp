@@ -13,7 +13,7 @@
 #include <algorithm>
 
 #include "nisaba/nisaba.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 #include "nisaba/effects/glass.hpp"
 #include "nisaba/pipeline/simd.hpp"
 
@@ -31,7 +31,7 @@
 
 using namespace nisaba;
 using namespace nisaba::text;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 using namespace nisaba::effects;
 
 namespace {

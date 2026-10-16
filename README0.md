@@ -269,7 +269,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - **Cross-Platform Permissions**: Dynamic permission requests for camera, audio, and storage on embedded and mobile targets (`backend_os::Permissions`).
   - **Radical Independence**: 100% free of GLFW, SDL, or external framework bloat.
 
-### 14. Sovereign Tiled-Span Hybrid Damage Tracking Subsystem (`nisaba::damage`)
+### 14. Sovereign VAXP Super Performance Render (VSPR) Subsystem (`nisaba::vspr`)
 - **Radical Sub-Element & Pixel-Span Precision**:
   - Blends high-performance 2D micro-tiles with contiguous 1D horizontal scanline spans (`Span`), achieving fine-grained dirty tracking at sub-component and pixel granularity.
   - Zero heap churn during steady-state invalidation passes: utilizes dense flat 64-bit bitmasks for $O(1)$ spatial tile marking and queries.

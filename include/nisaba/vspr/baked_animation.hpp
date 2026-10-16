@@ -10,7 +10,7 @@
 #include "nisaba/canvas/canvas.hpp"
 #include "nisaba/math/rect.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief Playback looping mode for BakedAnimation.
 enum class AnimationLoopMode : uint8_t {
@@ -170,4 +170,4 @@ private:
     std::vector<Pixmap> frames_;
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

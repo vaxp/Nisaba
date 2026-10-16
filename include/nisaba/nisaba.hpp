@@ -57,7 +57,7 @@
 #include "nisaba/mesh/mesh.hpp"
 #include "nisaba/raster/mesh_raster.hpp"
 #include "nisaba/canvas/canvas.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 #include "nisaba/gpu/gpu.hpp"
 
 #include "nisaba/image/image_types.hpp"

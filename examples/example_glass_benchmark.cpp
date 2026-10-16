@@ -12,7 +12,7 @@
 #include <optional>
 
 #include "nisaba/nisaba.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 #include "nisaba/effects/glass.hpp"
 
 #ifdef NISABA_HAS_BACKEND_OS
@@ -22,7 +22,7 @@
 
 using namespace nisaba;
 using namespace nisaba::text;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 using namespace nisaba::effects;
 
 namespace {

@@ -9,7 +9,7 @@
 #include <cmath>
 
 #include "nisaba/nisaba.hpp"
-#include "nisaba/damage/damage.hpp"
+#include "nisaba/vspr/vspr.hpp"
 #include "nisaba/text/text_cache.hpp"
 #include "nisaba/pdf/pdf_reader.hpp"
 #include "nisaba/pdf/pdf_writer.hpp"
@@ -35,7 +35,7 @@
 
 using namespace nisaba;
 using namespace nisaba::pdf;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 
 static std::string resolve_font_path(std::string_view font_name) {
     std::vector<std::string> candidates = {
@@ -286,7 +286,7 @@ static std::shared_ptr<Pixmap> g_studio_chrome_pixmap = nullptr;
 static std::shared_ptr<Pixmap> g_retained_page_surface = nullptr;
 static int g_retained_page = -1;
 static float g_retained_zoom = -1.0f;
-static damage::TiledSpanTracker<16> g_damage_tracker(1600, 1000);
+static vspr::TiledSpanTracker<16> g_damage_tracker(1600, 1000);
 static std::vector<ScreenIntRect> g_prev_dirty_rects;
 
 static void build_studio_chrome(

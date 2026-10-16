@@ -12,9 +12,9 @@
 #include "nisaba/canvas/canvas.hpp"
 #include "nisaba/math/rect.hpp"
 #include "nisaba/math/screen_int_rect.hpp"
-#include "nisaba/damage/types.hpp"
+#include "nisaba/vspr/types.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief Retained Surface / Sub-Tree / Page Backing-Store Cache.
 /// Provides zero-cost blitting for complex static views, pages, and dialogs.
@@ -213,4 +213,4 @@ private:
     std::unordered_map<std::string, SurfaceCache> caches_;
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

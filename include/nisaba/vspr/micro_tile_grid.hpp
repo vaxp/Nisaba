@@ -7,9 +7,9 @@
 #include <bit>
 #include "nisaba/math/rect.hpp"
 #include "nisaba/math/screen_int_rect.hpp"
-#include "nisaba/damage/types.hpp"
+#include "nisaba/vspr/types.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief High-performance spatial 2D micro-tile bitmask grid.
 /// Decomposes surface geometry into discrete Micro-Tiles (default 16x16 pixels)
@@ -145,4 +145,4 @@ private:
     std::vector<uint64_t> words_;
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

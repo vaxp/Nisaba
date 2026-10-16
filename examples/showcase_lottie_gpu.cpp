@@ -27,7 +27,7 @@ using namespace nisaba;
 using namespace nisaba::lottie;
 using namespace nisaba::effects;
 using namespace nisaba::text;
-using namespace nisaba::damage;
+using namespace nisaba::vspr;
 
 using nisaba::gpu::GpuCanvas;
 using nisaba::gpu::GpuSurface;

@@ -20,7 +20,7 @@
 #include <cstring>
 #include <optional>
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 namespace detail {
 
@@ -701,4 +701,4 @@ private:
     }
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr

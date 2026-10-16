@@ -6,10 +6,10 @@
 #include <optional>
 #include "nisaba/math/rect.hpp"
 #include "nisaba/math/screen_int_rect.hpp"
-#include "nisaba/damage/types.hpp"
-#include "nisaba/damage/micro_tile_grid.hpp"
+#include "nisaba/vspr/types.hpp"
+#include "nisaba/vspr/micro_tile_grid.hpp"
 
-namespace nisaba::damage {
+namespace nisaba::vspr {
 
 /// @brief Coordinates Tiled-Span Hybrid Damage Tracking.
 /// Merges 2D Micro-Tile bitmasks with 1D Scanline Spans and multi-buffer age accumulation.
@@ -228,4 +228,4 @@ private:
     std::vector<std::vector<ScreenIntRect>> history_;
 };
 
-} // namespace nisaba::damage
+} // namespace nisaba::vspr
