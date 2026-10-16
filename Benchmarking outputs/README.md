@@ -23,6 +23,7 @@ Each benchmark suite was executed **10 consecutive times in an automated and ind
 | **[`nisaba_vs_cairo.md`](./nisaba_vs_cairo.md)** | `GNU Cairo 1.18` (CPU) | 90 complex vector suites (curved paths, radial/linear gradients, Porter-Duff blending, alpha masking, affine transforms) | **7.57x faster** overall frame overhead (30.98 ms vs. 234.56 ms)<br>Nisaba won **89 of 90 suites (98.9%)** |
 | **[`nisaba_vs_skia.md`](./nisaba_vs_skia.md)** | `Google Skia CPU` | The identical 90 complex geometric suites under identical visual parameters | **2.40x faster** overall frame overhead (31.34 ms vs. 75.12 ms)<br>Nisaba won **70 of 90 suites (77.8%)** |
 | **[`gpu_micro_profiler.md`](./gpu_micro_profiler.md)** | `Google Skia (Ganesh GL)` | 100 hardware-accelerated GPU micro-benchmarks via OpenGL FBOs, batching, and command submission | **4.69x faster** in CPU command submission overhead<br>**1.09x faster** in end-to-end frame throughput |
+| **[`benchmark_runtime_shaders.md`](./benchmark_runtime_shaders.md)** | `Google Skia (SkRuntimeEffect / SkSL)` | 27 comprehensive runtime shader suites (cold compilation, uniform dispatch, procedural noise, SDF raymarching, geometry scaling, state ping-pong) | **1.36x to 2.53x faster** CPU submission overhead across rendering suites<br>Identified 3 key pipeline bottlenecks (regex parsing, fragment matrix multiply, draw call batching) |
 
 ---
 

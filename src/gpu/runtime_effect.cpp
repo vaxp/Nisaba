@@ -1,19 +1,51 @@
 #include "nisaba/gpu/runtime_effect.hpp"
 #include <GL/glew.h>
 #include <GL/gl.h>
-#include <sstream>
-#include <regex>
+#include <cctype>
+#include <cstring>
 #include <iostream>
 #include <algorithm>
 
 namespace nisaba::gpu {
+
+namespace {
+static GLuint s_shared_vert_shader = 0;
+
+static GLuint get_shared_vertex_shader() {
+    if (s_shared_vert_shader == 0) {
+        static const char* kVertSource =
+            "#version 150 core\n"
+            "uniform vec2 viewSize;\n"
+            "uniform mat3 u_localMatrix;\n"
+            "in vec2 vertex;\n"
+            "in vec2 tcoord;\n"
+            "in vec4 color;\n"
+            "out vec2 fpos;\n"
+            "out vec2 ftcoord;\n"
+            "out vec4 fcolor;\n"
+            "out vec2 v_localCoord;\n"
+            "void main(void) {\n"
+            "    fpos = vertex;\n"
+            "    ftcoord = tcoord;\n"
+            "    fcolor = color;\n"
+            "    v_localCoord = (u_localMatrix * vec3(vertex, 1.0)).xy;\n"
+            "    gl_Position = vec4(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0.0, 1.0);\n"
+            "}\n";
+        s_shared_vert_shader = glCreateShader(GL_VERTEX_SHADER);
+        const char* v_ptr = kVertSource;
+        glShaderSource(s_shared_vert_shader, 1, &v_ptr, nullptr);
+        glCompileShader(s_shared_vert_shader);
+    }
+    return s_shared_vert_shader;
+}
+} // namespace
 
 RuntimeEffect::~RuntimeEffect() {
     if (program_ != 0) {
         glDeleteProgram(program_);
         program_ = 0;
     }
-    if (vert_shader_ != 0) {
+    if (vert_shader_ != 0 && vert_shader_ != s_shared_vert_shader) {
         glDeleteShader(vert_shader_);
         vert_shader_ = 0;
     }
@@ -36,135 +68,191 @@ RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
         return Result{nullptr, "Empty shader source string."};
     }
 
-    std::string src(sksl);
+    const size_t n = sksl.size();
+    std::string transformed_code;
+    transformed_code.reserve(n + 64);
+
     std::vector<Uniform> uniforms;
+    uniforms.reserve(16);
     size_t current_offset = 0;
+    bool has_color_in = false;
 
-    // Regex to detect "uniform <type> <name>;"
-    // Matches standard GLSL and SkSL variable definitions
-    std::regex uniform_regex(R"(uniform\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*;)");
-    auto words_begin = std::sregex_iterator(src.begin(), src.end(), uniform_regex);
-    auto words_end = std::sregex_iterator();
+    auto skip_whitespace_and_comments = [&](size_t& idx) {
+        while (idx < n) {
+            if (std::isspace(static_cast<unsigned char>(sksl[idx]))) {
+                idx++;
+            } else if (idx + 1 < n && sksl[idx] == '/' && sksl[idx + 1] == '/') {
+                idx += 2;
+                while (idx < n && sksl[idx] != '\n') idx++;
+            } else if (idx + 1 < n && sksl[idx] == '/' && sksl[idx + 1] == '*') {
+                idx += 2;
+                while (idx + 1 < n && !(sksl[idx] == '*' && sksl[idx + 1] == '/')) idx++;
+                if (idx + 1 < n) idx += 2;
+            } else {
+                break;
+            }
+        }
+    };
 
-    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
-        std::smatch match = *i;
-        std::string type_str = match[1].str();
-        std::string name_str = match[2].str();
+    auto is_ident_start = [](char c) {
+        return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+    };
+    auto is_ident_char = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
 
-        Uniform u;
-        u.name = name_str;
-        u.offset = current_offset;
+    size_t i = 0;
+    std::string_view last_ident;
 
-        if (type_str == "float" || type_str == "half") {
-            u.type = Uniform::Type::Float;
-            u.sizeInBytes = 4;
-        } else if (type_str == "vec2" || type_str == "float2" || type_str == "half2") {
-            u.type = Uniform::Type::Float2;
-            u.sizeInBytes = 8;
-        } else if (type_str == "vec3" || type_str == "float3" || type_str == "half3") {
-            u.type = Uniform::Type::Float3;
-            u.sizeInBytes = 12;
-        } else if (type_str == "vec4" || type_str == "float4" || type_str == "half4") {
-            u.type = Uniform::Type::Float4;
-            u.sizeInBytes = 16;
-        } else if (type_str == "mat3" || type_str == "float3x3" || type_str == "half3x3") {
-            u.type = Uniform::Type::Mat3;
-            u.sizeInBytes = 36;
-        } else if (type_str == "mat4" || type_str == "float4x4" || type_str == "half4x4") {
-            u.type = Uniform::Type::Mat4;
-            u.sizeInBytes = 64;
-        } else if (type_str == "int") {
-            u.type = Uniform::Type::Int;
-            u.sizeInBytes = 4;
-        } else {
-            // Default 4 bytes for unrecognized uniform scalar
-            u.type = Uniform::Type::Float;
-            u.sizeInBytes = 4;
+    while (i < n) {
+        // Fast comment preservation
+        if (i + 1 < n && sksl[i] == '/' && sksl[i + 1] == '/') {
+            size_t start = i;
+            i += 2;
+            while (i < n && sksl[i] != '\n') i++;
+            transformed_code.append(sksl.substr(start, i - start));
+            continue;
+        }
+        if (i + 1 < n && sksl[i] == '/' && sksl[i + 1] == '*') {
+            size_t start = i;
+            i += 2;
+            while (i + 1 < n && !(sksl[i] == '*' && sksl[i + 1] == '/')) i++;
+            if (i + 1 < n) i += 2;
+            transformed_code.append(sksl.substr(start, i - start));
+            continue;
         }
 
-        current_offset += u.sizeInBytes;
-        uniforms.push_back(u);
+        if (is_ident_start(sksl[i])) {
+            size_t start = i;
+            while (i < n && is_ident_char(sksl[i])) i++;
+            std::string_view ident = sksl.substr(start, i - start);
+
+            if (ident == "uniform") {
+                // Look ahead for `<type> <name>;`
+                size_t p = i;
+                skip_whitespace_and_comments(p);
+                if (p < n && is_ident_start(sksl[p])) {
+                    size_t type_start = p;
+                    while (p < n && is_ident_char(sksl[p])) p++;
+                    std::string_view type_str = sksl.substr(type_start, p - type_start);
+
+                    skip_whitespace_and_comments(p);
+                    if (p < n && is_ident_start(sksl[p])) {
+                        size_t name_start = p;
+                        while (p < n && is_ident_char(sksl[p])) p++;
+                        std::string_view name_str = sksl.substr(name_start, p - name_start);
+
+                        skip_whitespace_and_comments(p);
+                        if (p < n && sksl[p] == ';') {
+                            Uniform u;
+                            u.name = std::string(name_str);
+                            u.offset = current_offset;
+
+                            if (type_str == "float" || type_str == "half") {
+                                u.type = Uniform::Type::Float;
+                                u.sizeInBytes = 4;
+                            } else if (type_str == "vec2" || type_str == "float2" || type_str == "half2") {
+                                u.type = Uniform::Type::Float2;
+                                u.sizeInBytes = 8;
+                            } else if (type_str == "vec3" || type_str == "float3" || type_str == "half3") {
+                                u.type = Uniform::Type::Float3;
+                                u.sizeInBytes = 12;
+                            } else if (type_str == "vec4" || type_str == "float4" || type_str == "half4") {
+                                u.type = Uniform::Type::Float4;
+                                u.sizeInBytes = 16;
+                            } else if (type_str == "mat3" || type_str == "float3x3" || type_str == "half3x3") {
+                                u.type = Uniform::Type::Mat3;
+                                u.sizeInBytes = 36;
+                            } else if (type_str == "mat4" || type_str == "float4x4" || type_str == "half4x4") {
+                                u.type = Uniform::Type::Mat4;
+                                u.sizeInBytes = 64;
+                            } else if (type_str == "int") {
+                                u.type = Uniform::Type::Int;
+                                u.sizeInBytes = 4;
+                            } else {
+                                u.type = Uniform::Type::Float;
+                                u.sizeInBytes = 4;
+                            }
+
+                            current_offset += u.sizeInBytes;
+                            uniforms.push_back(u);
+                        }
+                    }
+                }
+                transformed_code.append(ident);
+            } else if (ident == "main") {
+                // Check if preceded by return type (vec4, half4, float4) and followed by '('
+                size_t p = i;
+                skip_whitespace_and_comments(p);
+                if (p < n && sksl[p] == '(') {
+                    bool valid_ret = (last_ident == "vec4" || last_ident == "half4" || last_ident == "float4");
+                    if (valid_ret) {
+                        size_t arg_start = p + 1;
+                        int paren_depth = 1;
+                        size_t k = arg_start;
+                        while (k < n && paren_depth > 0) {
+                            if (sksl[k] == '(') paren_depth++;
+                            else if (sksl[k] == ')') paren_depth--;
+                            else if (sksl[k] == ',' && paren_depth == 1) has_color_in = true;
+                            k++;
+                        }
+                        transformed_code.append("user_main");
+                    } else {
+                        transformed_code.append(ident);
+                    }
+                } else {
+                    transformed_code.append(ident);
+                }
+            } else {
+                transformed_code.append(ident);
+            }
+
+            last_ident = ident;
+            continue;
+        }
+
+        transformed_code.push_back(sksl[i]);
+        i++;
     }
 
-    // Determine main() signature: 1 argument vs 2 arguments
-    bool has_color_in = false;
-    std::regex main_2args_regex(R"(\b(vec4|half4|float4)\s+main\s*\(\s*[^,)]+\s*,\s*[^)]+\))");
-    if (std::regex_search(src, main_2args_regex)) {
-        has_color_in = true;
-    }
 
-    // Replace "vec4 main(" with "vec4 user_main("
-    std::regex main_rename_regex(R"(\b(vec4|half4|float4)\s+main\s*\()");
-    std::string transformed_code = std::regex_replace(src, main_rename_regex, "$1 user_main(");
-
-    // Build complete Vertex Shader
-    static const char* kVertSource =
+    // Build complete Fragment Shader with GLSL 150 header and zero ALU matrix overhead
+    std::string kFragSource;
+    kFragSource.reserve(transformed_code.size() + 512);
+    kFragSource +=
         "#version 150 core\n"
-        "uniform vec2 viewSize;\n"
-        "in vec2 vertex;\n"
-        "in vec2 tcoord;\n"
-        "in vec4 color;\n"
-        "out vec2 fpos;\n"
-        "out vec2 ftcoord;\n"
-        "out vec4 fcolor;\n"
-        "void main(void) {\n"
-        "    fpos = vertex;\n"
-        "    ftcoord = tcoord;\n"
-        "    fcolor = color;\n"
-        "    gl_Position = vec4(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0.0, 1.0);\n"
-        "}\n";
+        "precision highp float;\n\n"
+        "#define float2 vec2\n"
+        "#define float3 vec3\n"
+        "#define float4 vec4\n"
+        "#define float2x2 mat2\n"
+        "#define float3x3 mat3\n"
+        "#define float4x4 mat4\n"
+        "#define half float\n"
+        "#define half2 vec2\n"
+        "#define half3 vec3\n"
+        "#define half4 vec4\n"
+        "#define half2x2 mat2\n"
+        "#define half3x3 mat3\n"
+        "#define half4x4 mat4\n\n"
+        "uniform vec2 viewSize;\n\n"
+        "in vec2 fpos;\n"
+        "in vec2 ftcoord;\n"
+        "in vec4 fcolor;\n"
+        "in vec2 v_localCoord;\n"
+        "out vec4 outColor;\n\n";
 
-    // Build complete Fragment Shader with GLSL 150 header and user code wrapper
-    std::ostringstream frag_ss;
-    frag_ss << "#version 150 core\n"
-            << "precision highp float;\n\n"
-            << "#define float2 vec2\n"
-            << "#define float3 vec3\n"
-            << "#define float4 vec4\n"
-            << "#define float2x2 mat2\n"
-            << "#define float3x3 mat3\n"
-            << "#define float4x4 mat4\n"
-            << "#define half float\n"
-            << "#define half2 vec2\n"
-            << "#define half3 vec3\n"
-            << "#define half4 vec4\n"
-            << "#define half2x2 mat2\n"
-            << "#define half3x3 mat3\n"
-            << "#define half4x4 mat4\n\n"
-            << "uniform vec2 viewSize;\n"
-            << "uniform mat3 u_localMatrix;\n\n"
-            << "in vec2 fpos;\n"
-            << "in vec2 ftcoord;\n"
-            << "in vec4 fcolor;\n"
-            << "out vec4 outColor;\n\n"
-            << transformed_code << "\n\n"
-            << "void main(void) {\n"
-            << "    vec2 localCoord = (u_localMatrix * vec3(fpos, 1.0)).xy;\n";
-
+    kFragSource += transformed_code;
+    kFragSource += "\n\nvoid main(void) {\n";
     if (has_color_in) {
-        frag_ss << "    outColor = user_main(localCoord, fcolor);\n";
+        kFragSource += "    outColor = user_main(v_localCoord, fcolor);\n";
     } else {
-        frag_ss << "    outColor = user_main(localCoord);\n";
+        kFragSource += "    outColor = user_main(v_localCoord);\n";
     }
-    frag_ss << "}\n";
+    kFragSource += "}\n";
 
-    std::string kFragSource = frag_ss.str();
-
-    // Compile Vertex Shader
-    GLuint vert = glCreateShader(GL_VERTEX_SHADER);
-    const char* v_ptr = kVertSource;
-    glShaderSource(vert, 1, &v_ptr, nullptr);
-    glCompileShader(vert);
-
-    GLint status = 0;
-    glGetShaderiv(vert, GL_COMPILE_STATUS, &status);
-    if (status != GL_TRUE) {
-        char log[1024];
-        GLsizei len = 0;
-        glGetShaderInfoLog(vert, sizeof(log), &len, log);
-        glDeleteShader(vert);
-        return Result{nullptr, std::string("Vertex shader compile error: ") + log};
-    }
+    // Use shared pre-compiled Vertex Shader
+    GLuint vert = get_shared_vertex_shader();
 
     // Compile Fragment Shader
     GLuint frag = glCreateShader(GL_FRAGMENT_SHADER);
@@ -172,12 +260,12 @@ RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
     glShaderSource(frag, 1, &f_ptr, nullptr);
     glCompileShader(frag);
 
+    GLint status = 0;
     glGetShaderiv(frag, GL_COMPILE_STATUS, &status);
     if (status != GL_TRUE) {
         char log[2048];
         GLsizei len = 0;
         glGetShaderInfoLog(frag, sizeof(log), &len, log);
-        glDeleteShader(vert);
         glDeleteShader(frag);
         return Result{nullptr, std::string("Fragment shader compile error: ") + log};
     }
@@ -197,7 +285,6 @@ RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
         char log[1024];
         GLsizei len = 0;
         glGetProgramInfoLog(prog, sizeof(log), &len, log);
-        glDeleteShader(vert);
         glDeleteShader(frag);
         glDeleteProgram(prog);
         return Result{nullptr, std::string("Program link error: ") + log};
@@ -224,6 +311,21 @@ RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
     return Result{effect, ""};
 }
 
+RuntimeShader::RuntimeShader(std::shared_ptr<RuntimeEffect> effect,
+                             std::vector<uint8_t> uniformData,
+                             Transform2D localMatrix)
+    : effect_(std::move(effect)),
+      uniform_data_(std::move(uniformData)),
+      local_matrix_(localMatrix) {
+    Transform2D invLocal;
+    if (!local_matrix_.inverse(invLocal)) {
+        invLocal = Transform2D::identity();
+    }
+    inv_m3_[0] = invLocal[0]; inv_m3_[1] = invLocal[1]; inv_m3_[2] = 0.0f;
+    inv_m3_[3] = invLocal[2]; inv_m3_[4] = invLocal[3]; inv_m3_[5] = 0.0f;
+    inv_m3_[6] = invLocal[4]; inv_m3_[7] = invLocal[5]; inv_m3_[8] = 1.0f;
+}
+
 void RuntimeShader::bind(const float* viewSize) const {
     if (!effect_ || effect_->programId() == 0) return;
 
@@ -234,21 +336,7 @@ void RuntimeShader::bind(const float* viewSize) const {
     }
 
     if (effect_->localMatrixLoc() >= 0) {
-        Transform2D invLocal;
-        if (!local_matrix_.inverse(invLocal)) {
-            invLocal = Transform2D::identity();
-        }
-
-        // Column-major 3x3 matrix for OpenGL:
-        // [ m0 m2 m4 ]
-        // [ m1 m3 m5 ]
-        // [  0  0  1 ]
-        float m3[9] = {
-            invLocal[0], invLocal[1], 0.0f,
-            invLocal[2], invLocal[3], 0.0f,
-            invLocal[4], invLocal[5], 1.0f
-        };
-        glUniformMatrix3fv(effect_->localMatrixLoc(), 1, GL_FALSE, m3);
+        glUniformMatrix3fv(effect_->localMatrixLoc(), 1, GL_FALSE, inv_m3_);
     }
 
     for (const auto& u : effect_->uniforms()) {

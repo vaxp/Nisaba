@@ -74,5 +74,10 @@ if cairo_dep.found()
       dependencies : [nisaba_dep, skia_lib, fontconfig_dep, gl_dep, zlib_dep, nisaba_backend_os_dep, egl_dep, dl_dep],
       include_directories : skia_inc
     )
+    benchmark_runtime_shaders_exe = executable('benchmark_runtime_shaders',
+      'benchmark_runtime_shaders.cpp',
+      dependencies : [nisaba_dep, skia_lib, fontconfig_dep, gl_dep, zlib_dep, egl_dep, dl_dep],
+      include_directories : skia_inc
+    )
   endif
 endif

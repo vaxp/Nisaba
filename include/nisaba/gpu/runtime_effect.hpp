@@ -66,10 +66,7 @@ class RuntimeShader : public Shader {
 public:
     RuntimeShader(std::shared_ptr<RuntimeEffect> effect,
                   std::vector<uint8_t> uniformData,
-                  Transform2D localMatrix = Transform2D::identity())
-        : effect_(std::move(effect)),
-          uniform_data_(std::move(uniformData)),
-          local_matrix_(localMatrix) {}
+                  Transform2D localMatrix = Transform2D::identity());
 
     void* getNativeHandle() const override { return const_cast<RuntimeShader*>(this); }
     [[nodiscard]] bool isOpaque() const override { return false; }
@@ -84,6 +81,7 @@ private:
     std::shared_ptr<RuntimeEffect> effect_;
     std::vector<uint8_t> uniform_data_;
     Transform2D local_matrix_;
+    float inv_m3_[9]{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
 };
 
 class RuntimeShaderBuilder {

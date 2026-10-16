@@ -1472,7 +1472,7 @@ void GL3Renderer::renderFill(const Paint& paint, const CompositeOperationState& 
 			    last.clipDepth == m_impl->currentClipDepth) {
 
 				FragUniforms* lastFrag = m_impl->fragUniformPtr(last.uniformOffset);
-				if (std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
+				if (paint.customShader != nullptr || std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
 					int offset = static_cast<int>(m_impl->verts.size());
 					m_impl->verts.resize(offset + numTriVerts);
 					Vertex* dst = &m_impl->verts[offset];
@@ -1693,7 +1693,7 @@ void GL3Renderer::renderStroke(const Paint& paint, const CompositeOperationState
 			    last.clipDepth == m_impl->currentClipDepth) {
 
 				FragUniforms* lastFrag = m_impl->fragUniformPtr(last.uniformOffset);
-				if (std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
+				if (paint.customShader != nullptr || std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
 					int offset = static_cast<int>(m_impl->verts.size());
 					m_impl->verts.resize(offset + numTriVerts);
 					Vertex* dst = &m_impl->verts[offset];
@@ -1892,7 +1892,7 @@ void GL3Renderer::renderTriangles(const Paint& paint, const CompositeOperationSt
 		    last.clipDepth == m_impl->currentClipDepth) {
 
 			FragUniforms* lastFrag = m_impl->fragUniformPtr(last.uniformOffset);
-			if (std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
+			if (paint.customShader != nullptr || std::memcmp(lastFrag, &tempFrag, sizeof(FragUniforms)) == 0) {
 				int offset = static_cast<int>(m_impl->verts.size());
 				m_impl->verts.resize(offset + nverts);
 				std::memcpy(&m_impl->verts[offset], verts, nverts * sizeof(Vertex));
