@@ -154,12 +154,14 @@ void GpuSurface::bind() {
 
 void GpuSurface::resolve() {
     if (!device_ || samples_ <= 1 || !needs_resolve_) return;
+    device_->make_current();
     device_->blit_framebuffer(fbo_id_, resolve_fbo_, width_, height_);
     needs_resolve_ = false;
 }
 
 void GpuSurface::resolve(const ScreenIntRect& damage_rect) {
     if (!device_ || samples_ <= 1 || !needs_resolve_) return;
+    device_->make_current();
     int32_t x0 = static_cast<int32_t>(damage_rect.x());
     int32_t y0 = static_cast<int32_t>(damage_rect.y());
     int32_t x1 = static_cast<int32_t>(damage_rect.x() + damage_rect.width());
@@ -169,6 +171,7 @@ void GpuSurface::resolve(const ScreenIntRect& damage_rect) {
 
 void GpuSurface::resolve(const std::vector<ScreenIntRect>& damage_rects) {
     if (!device_ || samples_ <= 1 || !needs_resolve_) return;
+    device_->make_current();
     for (const auto& r : damage_rects) {
         resolve(r);
     }

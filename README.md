@@ -83,6 +83,12 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 ### Sovereign Full-Specification PDF Studio & GPU Viewer Showcase (`nisaba::pdf` & `nisaba::gpu`)
 ![Nisaba PDF Viewer Showcase](showcase/nisaba_pdf_viewer_showcase.png)
 
+### VSPR Ahead-Of-Time (AOT) UI Scene Compilation Showcase (`nisaba::vspr::AotSceneCompiler`)
+![VSPR AOT UI Compilation Showcase](showcase/aot_ui_comparison_gpu.png)
+
+### VSPR Hardware Primitive Instancing Showcase (`nisaba::vspr::PrimitiveInstancer`)
+![VSPR Primitive Instancing Showcase](showcase/instancing_comparison_gpu.png)
+
 ---
 
 ## Key Architectural Pillars
@@ -358,6 +364,13 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
     - **Micro-Pulse (Blinking cursor $4 \times 20$ px)**: **678x - 775x faster** (Mean latency dropped from **5.42 ms** down to **0.008 ms / 8 $\mu$s**, **99.85% frame time saved**, **135,863 FPS**).
     - **Sub-Component (Counter & Gauge $190 \times 35$ px)**: **252x - 265x faster** (Mean latency dropped from **5.04 ms** down to **0.020 ms / 20 $\mu$s**, **99.60% frame time saved**, **56,573 FPS**).
     - **Multi-Zone (4 concurrent micro-spots)**: **92x - 106x faster** (Mean latency dropped from **5.08 ms** down to **0.055 ms / 55 $\mu$s**, **98.92% frame time saved**, **20,092 FPS**).
+- **Ahead-Of-Time (AOT) UI Scene Compilation (`AotSceneCompiler` & `CompiledUiSurface`)**:
+  - Compiles complex visual layouts, static chromes, and interactive component state representations ahead of time into unified, hardware-ready surfaces.
+  - Dynamically routes live application data through isolated punch-through slots, eliminating continuous full-frame vector rasterization cycles.
+  - Dramatically improves rendering performance, slashes frame processing overhead to near zero, and ensures instantaneous UI responsiveness across complex viewports.
+- **Hardware-Accelerated Primitive Instancing (`PrimitiveInstancer`)**:
+  - Consolidates and renders vast collections of repetitive geometric forms, controls, and vector primitives in batched operations.
+  - Substantially eliminates driver call overhead and CPU-to-GPU dispatch bottlenecks, unlocking massive performance gains in element-dense interfaces.
 
 ### 15. Sovereign Lottie Vector Animation Engine (`nisaba::lottie` & `nisaba::json`)
 - **100% Technological Sovereignty & Zero Dependencies**:
@@ -523,6 +536,10 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **29 Blend Modes**: All 12 Porter-Duff modes (`Clear`, `Source`, `Dest`, `SourceOver`, `DestOver`, `SourceIn`, `DestIn`, `SourceOut`, `DestOut`, `SourceAtop`, `DestAtop`, `Xor`) plus 17 advanced blend modes (`Plus`, `Modulate`, `Screen`, `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`, `Multiply`, `Hue`, `Saturation`, `Color`, `Luminosity`).
 - **Complete W3C SVG Support**: `<path>`, `<rect>`, `<circle>`, `<ellipse>`, `<line>`, `<polyline>`, `<polygon>`, `<defs>`, `<use>`, `<clipPath>`, `<mask>`, `<linearGradient>`, `<radialGradient>`, `<image>` (including RFC 2397 base64 inline data URIs), and affine `skewX`/`skewY` transforms.
 - **Multilingual Typography & OpenType**: TrueType outlines (.ttf), PostScript CFF Type 2 Charstrings (.otf), GSUB ligatures and contextual substitutions, GPOS pair kerning, Unicode BiDi, and Arabic shaping.
+- **VSPR Super Performance Acceleration**:
+  - Ahead-of-Time (AOT) UI scene compilation with dynamic slot routing and interactive state caching.
+  - Hardware-accelerated primitive instancing and batching for high-density geometric layouts.
+  - Fine-grained micro-tile and scanline span damage tracking with multi-buffer history.
 
 ---
 ## License & Sovereignty

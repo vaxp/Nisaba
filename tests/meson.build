@@ -234,6 +234,20 @@ test_damage_tracker_exe = executable('test_damage_tracker',
 )
 test('damage_tracker_test', test_damage_tracker_exe)
 
+# VSPR Primitive & Shape Instancer unit tests
+test_primitive_instancer_exe = executable('test_primitive_instancer',
+  'test_primitive_instancer.cpp',
+  dependencies : nisaba_dep
+)
+test('primitive_instancer_test', test_primitive_instancer_exe)
+
+# VSPR AOT UI Compilation unit tests
+test_aot_ui_exe = executable('test_aot_ui',
+  'test_aot_ui.cpp',
+  dependencies : nisaba_dep
+)
+test('aot_ui_test', test_aot_ui_exe)
+
 # Animation subsystem unit tests
 if get_option('enable_animation')
   test_animation_exe = executable('test_animation',

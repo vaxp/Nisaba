@@ -94,6 +94,18 @@ if get_option('enable_gpu')
       dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
     )
 
+    example_instancing_comparison_gpu_exe = executable('example_instancing_comparison_gpu',
+      'example_instancing_comparison_gpu.cpp',
+      cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
+      dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
+    )
+
+    example_aot_comparison_gpu_exe = executable('example_aot_comparison_gpu',
+      'example_aot_comparison_gpu.cpp',
+      cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
+      dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
+    )
+
     example_glass_benchmark_exe = executable('example_glass_benchmark',
       'example_glass_benchmark.cpp',
       cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],

@@ -10,4 +10,7 @@
 #include "nisaba/vspr/adaptive_invalidator.hpp"
 #include "nisaba/vspr/baked_animation.hpp"
 #include "nisaba/vspr/backdrop_blur_cache.hpp"
+#include "nisaba/vspr/shape_archetype.hpp"
+#include "nisaba/vspr/primitive_instancer.hpp"
+#include "nisaba/vspr/aot_ui.hpp"
 
