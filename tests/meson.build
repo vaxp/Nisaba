@@ -303,4 +303,12 @@ test_rrect_exe = executable('test_rrect',
 )
 test('rrect_test', test_rrect_exe)
 
+if get_option('enable_compositor')
+  test_compositor_exe = executable('test_compositor',
+    'test_compositor.cpp',
+    dependencies : nisaba_dep
+  )
+  test('compositor_test', test_compositor_exe)
+endif
+
 

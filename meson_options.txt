@@ -10,3 +10,4 @@ option('enable_vulkan', type : 'boolean', value : true, description : 'Enable so
 option('enable_lottie', type : 'boolean', value : true, description : 'Enable sovereign nisaba-lottie vector animation engine')
 option('enable_markdown', type : 'boolean', value : true, description : 'Enable sovereign nisaba-markdown document engine')
 option('enable_pdf', type : 'boolean', value : true, description : 'Enable sovereign nisaba-pdf document engine')
+option('enable_compositor', type : 'boolean', value : true, description : 'Enable native Wayland compositor pipeline and DRM/GBM/DMA-BUF hardware support')

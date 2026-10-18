@@ -72,6 +72,10 @@ egl_dep = dependency('egl', required : false)
 dl_dep = dependency('dl', required : false)
 glew_dep = dependency('glew', required : get_option('enable_gpu'))
 vulkan_dep = dependency('vulkan', required : get_option('enable_vulkan'))
+gbm_dep = dependency('gbm', required : get_option('enable_compositor'))
+drm_dep = dependency('libdrm', required : get_option('enable_compositor'))
+wayland_server_dep = dependency('wayland-server', required : get_option('enable_compositor'))
+glesv2_dep = dependency('glesv2', required : get_option('enable_compositor'))
 
 extra_deps = []
 if dl_dep.found()
@@ -88,6 +92,18 @@ if glew_dep.found()
 endif
 if vulkan_dep.found()
   extra_deps += vulkan_dep
+endif
+if gbm_dep.found()
+  extra_deps += gbm_dep
+endif
+if drm_dep.found()
+  extra_deps += drm_dep
+endif
+if wayland_server_dep.found()
+  extra_deps += wayland_server_dep
+endif
+if glesv2_dep.found()
+  extra_deps += glesv2_dep
 endif
 
 if get_option('enable_gpu')
@@ -116,6 +132,32 @@ if get_option('enable_gpu')
       'src/gpu/vulkan/vulkan_renderer.cpp',
     )
   endif
+endif
+
+if get_option('enable_compositor')
+  add_project_arguments('-DNISABA_HAS_COMPOSITOR=1', language: ['c', 'cpp'])
+  nisaba_sources += files(
+    'src/gpu/compositor/gbm_device.cpp',
+    'src/gpu/compositor/gbm_allocator.cpp',
+    'src/gpu/compositor/gbm_buffer.cpp',
+    'src/gpu/compositor/egl_context.cpp',
+    'src/gpu/compositor/egl_image.cpp',
+    'src/gpu/compositor/texture.cpp',
+    'src/gpu/compositor/dmabuf_texture.cpp',
+    'src/gpu/compositor/shm_texture.cpp',
+    'src/gpu/compositor/solid_texture.cpp',
+    'src/gpu/compositor/damage_ring.cpp',
+    'src/gpu/compositor/dual_kawase.cpp',
+    'src/gpu/compositor/render_target.cpp',
+    'src/gpu/compositor/shader.cpp',
+    'src/gpu/compositor/render_pass.cpp',
+    'src/gpu/compositor/renderer.cpp',
+    'src/gpu/compositor/scene_node.cpp',
+    'src/gpu/compositor/scene_tree.cpp',
+    'src/gpu/compositor/swapchain.cpp',
+    'src/gpu/compositor/frame_clock.cpp',
+    'src/gpu/compositor/compositor_canvas.cpp',
+  )
 endif
 
 
