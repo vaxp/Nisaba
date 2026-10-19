@@ -186,6 +186,14 @@ public:
         return m_extents;
     }
 
+    [[nodiscard]] bool intersects(const RectI& box) const noexcept {
+        if (!m_extents.intersects(box)) return false;
+        for (const auto& r : m_rects) {
+            if (r.intersects(box)) return true;
+        }
+        return false;
+    }
+
     [[nodiscard]] const std::vector<RectI>& rects() const noexcept {
         return m_rects;
     }

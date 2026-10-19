@@ -28,6 +28,16 @@ public:
         uint32_t screen_fbo_id = 0
     );
 
+    /// Wraps an existing compositor RenderTarget FBO into a sovereign non-owning GpuSurface.
+    static std::shared_ptr<GpuSurface> from_render_target(
+        std::shared_ptr<GpuDevice> device,
+        uint32_t width,
+        uint32_t height,
+        uint32_t fbo_id
+    ) {
+        return from_screen(std::move(device), width, height, fbo_id);
+    }
+
     virtual ~GpuSurface();
 
     [[nodiscard]] virtual GpuBackendType backend_type() const noexcept {

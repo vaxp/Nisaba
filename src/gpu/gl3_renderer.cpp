@@ -973,10 +973,22 @@ GL3Renderer::~GL3Renderer() {
 }
 
 bool GL3Renderer::init() {
-	static const char* shaderHeader =
+	const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+	bool is_gles = (ver != nullptr && std::strstr(ver, "OpenGL ES") != nullptr);
+
+	static const char* shaderHeaderGL =
 		"#version 150 core\n"
 		"#define NISABA_GL3 1\n"
 		"#define USE_UNIFORMBUFFER 1\n\n";
+
+	static const char* shaderHeaderGLES =
+		"#version 300 es\n"
+		"#define NISABA_GL3 1\n"
+		"#define USE_UNIFORMBUFFER 1\n"
+		"precision highp float;\n"
+		"precision highp int;\n\n";
+
+	const char* shaderHeader = is_gles ? shaderHeaderGLES : shaderHeaderGL;
 
 	static const char* fillVertShader =
 		"uniform vec2 viewSize;\n"

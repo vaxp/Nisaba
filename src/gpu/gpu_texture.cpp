@@ -7,17 +7,33 @@ GpuTexture::GpuTexture(
     uint32_t texture_id,
     uint32_t width,
     uint32_t height,
-    GpuTextureFormat format
+    GpuTextureFormat format,
+    bool owns_texture
 ) : device_(std::move(device)),
     texture_id_(texture_id),
     width_(width),
     height_(height),
-    format_(format) {}
+    format_(format),
+    owns_texture_(owns_texture) {}
 
 GpuTexture::~GpuTexture() {
-    if (device_ && texture_id_ != 0) {
+    if (device_ && texture_id_ != 0 && owns_texture_) {
         device_->delete_texture(texture_id_);
     }
+}
+
+std::shared_ptr<GpuTexture> GpuTexture::from_native_handle(
+    std::shared_ptr<GpuDevice> device,
+    uint32_t texture_id,
+    uint32_t width,
+    uint32_t height,
+    GpuTextureFormat format,
+    bool owns_texture
+) {
+    if (texture_id == 0 || width == 0 || height == 0) return nullptr;
+    return std::shared_ptr<GpuTexture>(new GpuTexture(
+        std::move(device), texture_id, width, height, format, owns_texture
+    ));
 }
 
 std::shared_ptr<GpuTexture> GpuTexture::create(

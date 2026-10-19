@@ -53,7 +53,7 @@ std::shared_ptr<EglContext> EglContext::create(std::shared_ptr<GbmDevice> device
 
     const EGLint configAttribs[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RENDERABLE_TYPE, 0x00000040 /* EGL_OPENGL_ES3_BIT */,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -64,17 +64,34 @@ std::shared_ptr<EglContext> EglContext::create(std::shared_ptr<GbmDevice> device
     EGLConfig config = nullptr;
     EGLint numConfigs = 0;
     if (!eglChooseConfig(display, configAttribs, &config, 1, &numConfigs) || numConfigs <= 0) {
-        logError("EglContext::create: Failed to choose EGLConfig");
-        eglTerminate(display);
-        return nullptr;
+        const EGLint configAttribsFallback[] = {
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_NONE,
+        };
+        if (!eglChooseConfig(display, configAttribsFallback, &config, 1, &numConfigs) || numConfigs <= 0) {
+            logError("EglContext::create: Failed to choose EGLConfig");
+            eglTerminate(display);
+            return nullptr;
+        }
     }
 
-    const EGLint contextAttribs[] = {
-        EGL_CONTEXT_CLIENT_VERSION, 2,
+    const EGLint contextAttribs3[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 3,
         EGL_NONE,
     };
-
-    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
+    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs3);
+    if (context == EGL_NO_CONTEXT) {
+        const EGLint contextAttribs2[] = {
+            EGL_CONTEXT_CLIENT_VERSION, 2,
+            EGL_NONE,
+        };
+        context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs2);
+    }
     if (context == EGL_NO_CONTEXT) {
         logError("EglContext::create: Failed to create EGLContext (error 0x{:04x})", eglGetError());
         eglTerminate(display);

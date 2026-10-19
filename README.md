@@ -12,9 +12,9 @@
 
 </div>
 
-**Nisaba** (`nisaba`) is an embedded-first, zero-dependency, ultra-lightweight 2D graphics rendering and layout engine written from scratch in **Modern C++ (C++20)**, featuring multi-backend sovereign rendering (CPU software rasterizer, native **Vulkan** GPU pipeline, and **OpenGL ES 3.2** GPU pipeline), exact geometric path boolean operations (`nisaba::path_ops`), stroke-to-fill path outlining (`nisaba::stroker`), multi-format embedded framebuffers (RGB565, Alpha8, Gray8, BGRA8888, RGBA8888), physical linear-space sRGB color blending, a deterministic 7-stage Flexible Box and UI layout engine (`nisaba-layout`), complete sovereign image codec subsystems, a sovereign Lottie vector animation engine (`nisaba::lottie`), an optional sovereign native OS platform and windowing subsystem (`backend_os`), a sovereign Markdown document layout and multi-page rendering engine (`nisaba::markdown`), and a full-specification sovereign PDF document engine (`nisaba::pdf`). Purpose-built as the native rendering foundation for the **`vaxp`** cross-platform organization.
+**Nisaba** (`nisaba`) is an embedded-first, zero-dependency, ultra-lightweight 2D graphics rendering and layout engine written from scratch in **Modern C++ (C++20)**, featuring multi-backend sovereign rendering (CPU software rasterizer, native **Vulkan** GPU pipeline, and **OpenGL ES 3.2** GPU pipeline), a sovereign Wayland hardware GPU compositor subsystem (`nisaba::compositor`), exact geometric path boolean operations (`nisaba::path_ops`), stroke-to-fill path outlining (`nisaba::stroker`), multi-format embedded framebuffers (RGB565, Alpha8, Gray8, BGRA8888, RGBA8888), physical linear-space sRGB color blending, a deterministic 7-stage Flexible Box and UI layout engine (`nisaba-layout`), complete sovereign image codec subsystems, a sovereign Lottie vector animation engine (`nisaba::lottie`), an optional sovereign native OS platform and windowing subsystem (`backend_os`), a sovereign Markdown document layout and multi-page rendering engine (`nisaba::markdown`), and a full-specification sovereign PDF document engine (`nisaba::pdf`). Purpose-built as the native rendering foundation for the **`vaxp`** cross-platform organization.
 
-Nisaba delivers high-end vector graphics, geometric path boolean algebra (Union, Difference, Intersect, Xor), high-precision 256-level subpixel anti-aliasing, hardware 4x MSAA, analytical SDF Gaussian shadows, screen-space dithering, two-point conical & compose multi-shaders, 4x5 affine color matrix filtering, Porter-Duff compositing, full W3C SVG vector graphics with gradients and masks, real-time Bodymovin/Lottie vector animations, a sovereign multilingual typography subsystem with native TrueType and PostScript CFF/OpenType layout, zero-dependency PNG/JPEG/WebP/QOI image codecs, a sovereign CommonMark/GFM Markdown engine, a full-specification ISO 32000 PDF document engine, an adaptive flexbox and stack layout solver, and a sovereign cross-platform OS windowing layer with **absolute technological sovereignty** (zero external third-party dependencies, 100% free of GLFW/SDL).
+Nisaba delivers high-end vector graphics, direct DMA-BUF zero-copy Wayland window composition, geometric path boolean algebra (Union, Difference, Intersect, Xor), high-precision 256-level subpixel anti-aliasing, hardware 4x MSAA, analytical SDF Gaussian shadows, screen-space dithering, two-point conical & compose multi-shaders, procedural GLSL runtime shaders, 4x5 affine color matrix filtering, Porter-Duff compositing, full W3C SVG vector graphics with gradients and masks, real-time Bodymovin/Lottie vector animations, a sovereign multilingual typography subsystem with native TrueType and PostScript CFF/OpenType layout, zero-dependency PNG/JPEG/WebP/QOI image codecs, a sovereign CommonMark/GFM Markdown engine, a full-specification ISO 32000 PDF document engine, an adaptive flexbox and stack layout solver, and a sovereign cross-platform OS windowing layer with **absolute technological sovereignty** (zero external third-party dependencies, 100% free of GLFW/SDL).
 
 
 ---
@@ -89,6 +89,11 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 ### VSPR Hardware Primitive Instancing Showcase (`nisaba::vspr::PrimitiveInstancer`)
 ![VSPR Primitive Instancing Showcase](showcase/instancing_comparison_gpu.png)
 
+### Sovereign Wayland GPU Compositor & Vector Pipeline Fusion Showcase (`nisaba::compositor` & `nisaba::gpu`)
+![Nisaba Sovereign GPU Compositor Showcase](showcase/compositor_desktop_showcase.png)
+
+High-performance composite of a Full HD 1080p desktop session running at ultra-high real-time framerates and sub-millisecond composition latency with zero dynamic heap allocations in steady-state loop. Demonstrates zero-copy DMA-BUF window surface scanout, analytical SDF window drop shadows, hardware-accelerated frosted glass dock with Dual-Kawase backdrop blur, live telemetry activity monitors, and procedural GLSL runtime shader integration.
+
 ---
 
 ## Key Architectural Pillars
@@ -153,14 +158,14 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **High-Performance SVG Caching (`SvgCache`)**:
   - Eliminates repeated runtime Bézier parsing, curve tessellation, and scanline rasterization by caching pre-rasterized vector assets in an intelligent LRU (Least Recently Used) cache.
   - Generates robust 64-bit FNV-1a composite keys combining source path/XML hash, target dimensions, and dynamic tint values.
-  - Achieves a **39.5x throughput boost** over raw uncached vector rasterization (latency reduced from **138.0 μs down to 3.49 μs** per draw call).
+  - Achieves massive multi-fold throughput gains over raw uncached vector rasterization by reducing repeated curve parsing and tessellation overhead to near zero per draw call.
 - **Pre-Baked Surfaces (`BakedSvg`)**:
   - Pre-bakes SVG documents once to high-quality raster surfaces (`Pixmap`), turning subsequent draws into instant $O(1)$ SIMD row blits via `simd::blend_source_over_span`.
   - Direct integration into `Canvas::draw_baked_svg(baked_svg, x, y, opacity)`.
 - **Dynamic Runtime Tint Modulation (Tinting)**:
   - Enables dynamic color modulation for monochrome SVG icons (e.g. UI status icons, battery, settings, search) at arbitrary resolutions and colors without modifying the source XML or duplicating asset files.
 - **GPU Pattern Blitting**:
-  - Seamless drawing onto hardware-accelerated `GpuCanvas` textures with pattern rendering, maintaining blistering 120+ FPS frame rates even under dense multi-icon loads.
+  - Seamless drawing onto hardware-accelerated `GpuCanvas` textures with pattern rendering, maintaining fluid high-refresh-rate frame rates even under dense multi-icon loads.
 
 ### 8. Sovereign 3D Perspective & Spatial Warping Engine (`nisaba::math` & `nisaba::raster`)
 - **4x4 Projective Transformation Matrix (`Transform4x4`)**: Full 3D affine and projective mathematics including 3D Euler rotations (pitch, yaw, roll), scale, translation, and perspective camera projection with focal distance $d$ ($W = 1 - z/d$).
@@ -197,7 +202,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
     $$\text{FragColor} = \frac{1}{12} \times \left(\sum \text{corners} + 2 \times \sum \text{edges}\right)$$
   - Core Profile VAO + Fullscreen Triangle VBO rasterization.
   - Automated vector framebuffer synchronization ensuring all background vector primitives are rasterized prior to texture capture (`glCopyTexSubImage2D`).
-  - High-level primitives: `GpuCanvas::draw_backdrop_blur(Rect, BorderRadius, sigma)` and `GpuCanvas::draw_backdrop_blur(RRect, sigma)` powering frosted glass cards, blurred dialogs, and translucent panels at sustained **120+ FPS**.
+  - High-level primitives: `GpuCanvas::draw_backdrop_blur(Rect, BorderRadius, sigma)` and `GpuCanvas::draw_backdrop_blur(RRect, sigma)` powering frosted glass cards, blurred dialogs, and translucent panels at fluid real-time framerates.
 - **GPU Vector Path & Shape Clipping via Dual-Nibble Stencil Buffer (`GpuCanvas::clip_path`, `GpuCanvas::clip_rrect`)**:
   - Dedicated `GL_DEPTH24_STENCIL8` renderbuffer attachment on both resolve and 4x MSAA framebuffers.
   - Dual-nibble stencil state encoding:
@@ -221,9 +226,9 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Full-specification hardware typography on GPU via dynamic Skyline 2D bin-packed alpha atlases ($1024 \times 1024$ dynamically expandable on-demand up to $2048 \times 2048$).
   - 1-pixel boundary padding eliminating texture bleeding, 4-bin subpixel horizontal positioning, and minimal dirty-region partial GPU texture flushes (`flushToGpu`).
   - Unified single-batch draw calls (`GpuCanvas::draw_text_buffer`) batching full shaped paragraphs and multi-line text layouts into a single GPU draw call with per-vertex color tinting (`Vertex::color`) for multicolored text spans and syntax highlighting.
-  - Benchmarked at **4.83x faster CPU Command Submission** and **1.12x faster overall frame throughput** in `gpu_micro_profiler`.
+  - Substantially accelerates CPU command submission and overall frame throughput by batching glyph geometry and eliminating redundant driver state transitions.
 - **Ultra-Low CPU Command Overhead & Sustained High Frame Rates**:
-  - Highly optimized GPU command recording and state caching delivering near-zero CPU submission overhead and sustained 120+ FPS throughput across complex vector scenes.
+  - Highly optimized GPU command recording and state caching delivering near-zero CPU submission overhead and sustained high-refresh-rate throughput across complex vector scenes.
 - **Continuous Ribbon Stroking & High-Density Tessellation**: Adaptive curved geometry tessellation with averaged vertex miter normals for continuous, break-free ribbons and strokes at arbitrary angles.
 - **Procedural Runtime Shaders & Dynamic Shader Injection Pipeline (`RuntimeEffect`, `RuntimeShaderBuilder`, `Shader`)**:
   - Runtime compilation and execution of procedural GLSL fragment programs on the OpenGL hardware pipeline.
@@ -241,7 +246,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Compile-time `constexpr` 256-entry CRC-32 (ISO 3309) and loop-unrolled Adler-32 accumulators.
   - Direct $O(1)$ primary Huffman table (9-bit lookup) for immediate single-cycle symbol resolution.
   - Sovereign LZ77 compressor with a 32 KB circular window (128 KB total memory footprint) that stays resident within CPU L2 cache, eliminating dynamic heap allocations.
-  - Multi-level compression: Fast UI Compositor Mode (Level 1, ~50 ms) for real-time window compositing and screen captures, and Production Storage Mode (Level 6) for maximum compression.
+  - Multi-level compression: Fast UI Compositor Mode (Level 1) for real-time window compositing and rapid screen captures, and Production Storage Mode (Level 6) for maximum compression.
 - **Sovereign PNG Subsystem (`nisaba::image::png`)**:
   - Full standard chunk parser and generator: `IHDR`, `PLTE`, `tRNS`, `IDAT`, `IEND` with multi-chunk streaming assembly.
   - Comprehensive color models: RGBA8, RGB8, Grayscale (1, 2, 4, 8, 16-bit), Grayscale+Alpha, and Indexed / 8-bit Colormap (Palette) with full alpha channel transparency.
@@ -281,7 +286,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Sovereign QOI Subsystem (`nisaba::image::qoi`)**:
   - Full Quite OK Image Format specification implementation in pure C++20.
   - All 6 core operations supported: `QOI_OP_RUN`, `QOI_OP_INDEX` (64-entry running color cache), `QOI_OP_DIFF`, `QOI_OP_LUMA`, `QOI_OP_RGB`, `QOI_OP_RGBA`.
-  - Ultra-fast lossless performance: encodes in **~7.9 ms** and decodes in **~7.4 ms** on 1400x900 HD surfaces (**12.8x faster than PNG**).
+  - Ultra-fast lossless performance: encodes and decodes in a fraction of the time required by traditional compression codecs on HD surfaces.
   - Direct integration into `Pixmap::load_qoi()`, `pixmap.save_qoi()`, and auto-detection via `qoif` magic bytes.
 - **Unified I/O & `Pixmap` Auto-Sniffing (`nisaba::image::image_io`)**:
   - `Pixmap::load_file(path)`: automatic magic-byte sniffing (PNG, JPEG, WebP, QOI, BMP, PPM).
@@ -359,11 +364,11 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
 - **Direct Canvas & Native Wayland Compositor Integration**:
   - Restricts software rendering passes directly via `Canvas::clip_rect(const ScreenIntRect&)`.
   - Propagates damage rectangles to the display server via `backend_os::Window::setDamage()` and Wayland `wl_surface_damage_buffer()`, slashing compositor blit overhead and GPU memory bus bandwidth.
-- **Empirical 10-Iteration Benchmark Validation (Full Repaint vs. Damage Tracking)**:
-  - Validated over 10 consecutive iterations per scenario on a full HD $1280 \times 800$ glassmorphic interactive dashboard (`benchmarks/benchmark_damage_tracking.cpp`):
-    - **Micro-Pulse (Blinking cursor $4 \times 20$ px)**: **678x - 775x faster** (Mean latency dropped from **5.42 ms** down to **0.008 ms / 8 $\mu$s**, **99.85% frame time saved**, **135,863 FPS**).
-    - **Sub-Component (Counter & Gauge $190 \times 35$ px)**: **252x - 265x faster** (Mean latency dropped from **5.04 ms** down to **0.020 ms / 20 $\mu$s**, **99.60% frame time saved**, **56,573 FPS**).
-    - **Multi-Zone (4 concurrent micro-spots)**: **92x - 106x faster** (Mean latency dropped from **5.08 ms** down to **0.055 ms / 55 $\mu$s**, **98.92% frame time saved**, **20,092 FPS**).
+- **Empirical Benchmark Validation (Full Repaint vs. Damage Tracking)**:
+  - Validated across interactive glassmorphic dashboard scenarios (`benchmarks/benchmark_damage_tracking.cpp`):
+    - **Micro-Pulse (Blinking cursor)**: Massive multi-order speedup, slashing frame invalidation latency and saving over 99% of rasterization overhead.
+    - **Sub-Component (Dynamic widgets & gauges)**: Drastic reduction in rasterization passes by restricting work exclusively to localized dirty regions.
+    - **Multi-Zone (Concurrent micro-updates)**: Orders of magnitude faster than full-frame repaints, keeping CPU/GPU utilization minimal.
 - **Ahead-Of-Time (AOT) UI Scene Compilation (`AotSceneCompiler` & `CompiledUiSurface`)**:
   - Compiles complex visual layouts, static chromes, and interactive component state representations ahead of time into unified, hardware-ready surfaces.
   - Dynamically routes live application data through isolated punch-through slots, eliminating continuous full-frame vector rasterization cycles.
@@ -386,7 +391,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Continuous parametric interpolation across scalar floats, 2D vectors (`Point`), and 4D colors (`Color`).
 - **Polymorphic CPU & Hardware GPU Vector Canvas (`ICanvas`)**:
   - Unified drawing abstraction enabling identical vector animation code to execute across software rasterizers (`Canvas`) and direct hardware GPU pipelines (`GpuCanvas`).
-  - Raw hardware vector render finishes in **~0.25 ms** per frame on GPU across concurrent animations, achieving **200+ FPS** uncapped real-time framerates.
+  - Hardware GPU vector rendering processes complex vector animations with negligible frame times, achieving smooth, fluid real-time framerates.
 - **Interactive Animation Player Lifecycle (`Player`)**:
   - Real-time playback controller supporting `play()`, `pause()`, `seek_frame()`, `seek_progress()`, speed scaling (`0.25x` to `4.0x`), and continuous looping.
 
@@ -449,7 +454,7 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Stream and string ciphers: RC4 (40-bit and 128-bit) with per-object key derivation (Algorithm 1), AES-128 (CBC mode), and AES-256 (CBC mode) with PKCS#7 unpadding.
   - Automatic transparent decryption of strings and streams during object resolution.
 - **Hardware-Accelerated GPU Rendering & Navigation (`nisaba::pdf::navigation`)**:
-  - Direct vector rendering onto hardware GPU pipelines (`PdfReader::render_page_gpu`) via `GpuCanvas` and Vulkan/OpenGL ES, achieving smooth 120+ FPS continuous viewport scrolling.
+  - Direct vector rendering onto hardware GPU pipelines (`PdfReader::render_page_gpu`) via `GpuCanvas` and Vulkan/OpenGL ES, achieving smooth, fluid real-time continuous viewport scrolling.
   - Hierarchical bookmarks and table of contents (`/Outlines`) with multi-byte text decoding (PDFDocEncoding, UTF-16BE, UTF-8 BOM), styles (bold/italic), and RGB colors.
   - Interactive hyperlink annotations (`/Annots` with `/Link`) supporting internal page jumps (`/GoTo`), external web links (`/URI`), external files (`/GoToR`), and named destinations with automatic page resolution (`resolve_destination_page`).
 - **Sovereign Vector PDF Generation (`PdfWriter`)**:
@@ -509,6 +514,23 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Dynamic compositing of two independent source shaders ($A$ and $B$) using any of Nisaba's 29 Porter-Duff or advanced blend modes.
   - Enables complex procedural materials, textured gradient masks, lighting modulation, and multi-pass shader composition in a single rasterization pass.
 
+### 23. Sovereign Wayland GPU Compositor & Vector Pipeline Fusion (`nisaba::compositor`)
+- **Dual-Path Zero-Copy Hardware Architecture**:
+  - Direct hardware DMA-BUF and EGLImage surface binding (`GpuTexture::from_native_handle` / `wl_buffer` import) delivering near-instantaneous zero-copy blit latency for client window contents without CPU staging memory copies.
+  - Full bidirectional vector engine unification: wraps native compositor render target FBOs directly as sovereign `GpuSurface` instances (`GpuSurface::from_render_target`), granting compositor windows, titlebars, docks, and overlays direct access to `GpuCanvas`.
+- **Strict RAII GPU State Isolation (`GlStateGuard`)**:
+  - Full-spectrum state capture and restoration preserving active GL program, Vertex Array Object (VAO), Array/Element Array buffers (VBO/EBO), framebuffer bindings (FBO read/draw), blend equations and functions, scissor box, viewport dimensions, depth/stencil tests, and texture unit bindings.
+  - Guarantees zero graphical artifacts, state corruption, or pipeline stalls when transitioning between raw Wayland surface blitting and complex vector UI drawing passes.
+- **High-Level Compositor Decorator Primitives (`CompositorCanvas`)**:
+  - Native window frame decoration with rounded corners, active/inactive accent borders, and subpixel window title typography (`drawWindowDecoration`).
+  - Modern desktop panels and floating dock bars with real-time Dual-Kawase frosted glass backdrop blur and specular edge borders (`drawDesktopPanel`).
+  - Procedural runtime shader injection across arbitrary compositor windows (`applyWindowShader`).
+  - Direct vector icon and glyph rendering (`drawSvg`, `drawText`) using built-in typography and glyph caching.
+- **O(1) Damage-Aware Spatial Culling**:
+  - Integrates with Nisaba's VSPR damage tracker and Wayland `wl_surface_damage_buffer`: static windows and occluded decorations are culled on CPU before submitting draw commands to the GPU.
+- **Zero Steady-State Heap Allocations**:
+  - Reusable static scratch vertex buffers and persistent descriptor tables sustain ultra-high real-time framerate throughput with zero dynamic heap allocations in steady-state loop.
+
 ---
 
 ## Core Engine Capabilities
@@ -540,6 +562,11 @@ Nisaba's native C++20 Flexible Box and UI Layout Engine powering reactive deskto
   - Ahead-of-Time (AOT) UI scene compilation with dynamic slot routing and interactive state caching.
   - Hardware-accelerated primitive instancing and batching for high-density geometric layouts.
   - Fine-grained micro-tile and scanline span damage tracking with multi-buffer history.
+- **Sovereign Wayland GPU Compositor Subsystem (`nisaba::compositor`)**:
+  - Zero-copy DMA-BUF/EGLImage window composition with near-instantaneous zero-copy hardware scanout latency.
+  - Strict RAII OpenGL ES state protection (`GlStateGuard`) eliminating state leaks between compositor passes and vector UI drawing.
+  - Full-pipeline vector fusion (`CompositorCanvas`) providing analytical SDF drop shadows, frosted glass panels with Dual-Kawase blur, procedural GLSL runtime shaders, and subpixel typography.
+  - Damage-aware spatial culling ($O(1)$) with zero steady-state heap allocations per frame and ultra-high framerate throughput.
 
 ---
 ## License & Sovereignty

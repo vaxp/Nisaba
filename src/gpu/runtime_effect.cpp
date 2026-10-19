@@ -13,7 +13,10 @@ static GLuint s_shared_vert_shader = 0;
 
 static GLuint get_shared_vertex_shader() {
     if (s_shared_vert_shader == 0) {
-        static const char* kVertSource =
+        const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        bool is_gles = (ver != nullptr && std::strstr(ver, "OpenGL ES") != nullptr);
+
+        static const char* kVertSourceGL =
             "#version 150 core\n"
             "uniform vec2 viewSize;\n"
             "uniform mat3 u_localMatrix;\n"
@@ -31,8 +34,30 @@ static GLuint get_shared_vertex_shader() {
             "    v_localCoord = (u_localMatrix * vec3(vertex, 1.0)).xy;\n"
             "    gl_Position = vec4(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0.0, 1.0);\n"
             "}\n";
+
+        static const char* kVertSourceGLES =
+            "#version 300 es\n"
+            "precision highp float;\n"
+            "precision highp int;\n"
+            "uniform vec2 viewSize;\n"
+            "uniform mat3 u_localMatrix;\n"
+            "in vec2 vertex;\n"
+            "in vec2 tcoord;\n"
+            "in vec4 color;\n"
+            "out vec2 fpos;\n"
+            "out vec2 ftcoord;\n"
+            "out vec4 fcolor;\n"
+            "out vec2 v_localCoord;\n"
+            "void main(void) {\n"
+            "    fpos = vertex;\n"
+            "    ftcoord = tcoord;\n"
+            "    fcolor = color;\n"
+            "    v_localCoord = (u_localMatrix * vec3(vertex, 1.0)).xy;\n"
+            "    gl_Position = vec4(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0.0, 1.0);\n"
+            "}\n";
+
         s_shared_vert_shader = glCreateShader(GL_VERTEX_SHADER);
-        const char* v_ptr = kVertSource;
+        const char* v_ptr = is_gles ? kVertSourceGLES : kVertSourceGL;
         glShaderSource(s_shared_vert_shader, 1, &v_ptr, nullptr);
         glCompileShader(s_shared_vert_shader);
     }
@@ -64,6 +89,14 @@ const RuntimeEffect::Uniform* RuntimeEffect::findUniform(const char* name) const
 }
 
 RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
+#ifdef NISABA_GLEW
+    static bool s_glew_inited = false;
+    if (!s_glew_inited) {
+        glewExperimental = GL_TRUE;
+        glewInit();
+        s_glew_inited = true;
+    }
+#endif
     if (sksl.empty()) {
         return Result{nullptr, "Empty shader source string."};
     }
@@ -216,11 +249,13 @@ RuntimeEffect::Result RuntimeEffect::MakeForShader(std::string_view sksl) {
     }
 
 
-    // Build complete Fragment Shader with GLSL 150 header and zero ALU matrix overhead
+    const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    bool is_gles = (ver != nullptr && std::strstr(ver, "OpenGL ES") != nullptr);
+
     std::string kFragSource;
     kFragSource.reserve(transformed_code.size() + 512);
+    kFragSource += is_gles ? "#version 300 es\n" : "#version 150 core\n";
     kFragSource +=
-        "#version 150 core\n"
         "precision highp float;\n\n"
         "#define float2 vec2\n"
         "#define float3 vec3\n"

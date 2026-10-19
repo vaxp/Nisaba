@@ -21,7 +21,7 @@ static constexpr Vertex kFullscreenTriangle[3] = {
     {-1.0f,  3.0f, 0.0f, 2.0f}
 };
 
-static const char* kDualKawaseVert = R"glsl(
+static const char* kDualKawaseVertGL = R"glsl(
 #version 130
 in vec2 pos;
 in vec2 uv;
@@ -35,7 +35,23 @@ void main() {
 }
 )glsl";
 
-static const char* kDualKawaseDownFrag = R"glsl(
+static const char* kDualKawaseVertGLES = R"glsl(
+#version 300 es
+precision highp float;
+precision highp int;
+in vec2 pos;
+in vec2 uv;
+uniform vec2 u_uv_scale;
+uniform vec2 u_uv_offset;
+out vec2 v_uv;
+
+void main() {
+    gl_Position = vec4(pos, 0.0, 1.0);
+    v_uv = uv * u_uv_scale + u_uv_offset;
+}
+)glsl";
+
+static const char* kDualKawaseDownFragGL = R"glsl(
 #version 130
 in vec2 v_uv;
 uniform sampler2D u_tex;
@@ -57,7 +73,31 @@ void main() {
 }
 )glsl";
 
-static const char* kDualKawaseUpFrag = R"glsl(
+static const char* kDualKawaseDownFragGLES = R"glsl(
+#version 300 es
+precision highp float;
+precision highp int;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_halfpixel;
+uniform float u_offset;
+out vec4 fragColor;
+
+void main() {
+    vec2 d = u_halfpixel * u_offset;
+
+    // 5-tap Dual Kawase Downsample pre-filter (4.0 center + 1.0 corners = 8.0 weight)
+    vec4 sum = texture(u_tex, v_uv) * 4.0;
+    sum += texture(u_tex, v_uv - d);
+    sum += texture(u_tex, v_uv + d);
+    sum += texture(u_tex, v_uv + vec2(d.x, -d.y));
+    sum += texture(u_tex, v_uv + vec2(-d.x, d.y));
+
+    fragColor = sum * 0.125;
+}
+)glsl";
+
+static const char* kDualKawaseUpFragGL = R"glsl(
 #version 130
 in vec2 v_uv;
 uniform sampler2D u_tex;
@@ -84,7 +124,44 @@ void main() {
 }
 )glsl";
 
+static const char* kDualKawaseUpFragGLES = R"glsl(
+#version 300 es
+precision highp float;
+precision highp int;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_halfpixel;
+uniform float u_offset;
+out vec4 fragColor;
+
+void main() {
+    vec2 d = u_halfpixel * u_offset;
+    vec2 half_d = d * 0.5;
+
+    // 8-tap Dual Kawase Upsample (Tent reconstruction filter)
+    vec4 sum = texture(u_tex, v_uv - half_d);
+    sum += texture(u_tex, v_uv + half_d);
+    sum += texture(u_tex, v_uv + vec2(half_d.x, -half_d.y));
+    sum += texture(u_tex, v_uv + vec2(-half_d.x, half_d.y));
+
+    sum += texture(u_tex, v_uv + vec2(-d.x, 0.0)) * 2.0;
+    sum += texture(u_tex, v_uv + vec2(d.x, 0.0)) * 2.0;
+    sum += texture(u_tex, v_uv + vec2(0.0, -d.y)) * 2.0;
+    sum += texture(u_tex, v_uv + vec2(0.0, d.y)) * 2.0;
+
+    fragColor = sum * (1.0 / 12.0);
+}
+)glsl";
+
 static GLuint compileShader(GLenum type, const char* src) {
+#ifdef NISABA_GLEW
+    static bool s_glew_inited = false;
+    if (!s_glew_inited) {
+        glewExperimental = GL_TRUE;
+        glewInit();
+        s_glew_inited = true;
+    }
+#endif
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
@@ -223,9 +300,16 @@ bool DualKawaseBlur::setup_vbo() {
 bool DualKawaseBlur::setup_shaders() {
     if (shaders_) return true;
 
+    const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    bool is_gles = (ver != nullptr && std::strstr(ver, "OpenGL ES") != nullptr);
+
+    const char* vertSrc = is_gles ? kDualKawaseVertGLES : kDualKawaseVertGL;
+    const char* downFragSrc = is_gles ? kDualKawaseDownFragGLES : kDualKawaseDownFragGL;
+    const char* upFragSrc = is_gles ? kDualKawaseUpFragGLES : kDualKawaseUpFragGL;
+
     auto set = std::make_unique<ShaderProgramSet>();
-    set->downProg = linkProgram(kDualKawaseVert, kDualKawaseDownFrag);
-    set->upProg = linkProgram(kDualKawaseVert, kDualKawaseUpFrag);
+    set->downProg = linkProgram(vertSrc, downFragSrc);
+    set->upProg = linkProgram(vertSrc, upFragSrc);
 
     if (!set->downProg || !set->upProg) {
         return false;

@@ -219,5 +219,9 @@ if get_option('enable_pdf')
   )
 endif
 
-
-
+if get_option('enable_compositor')
+  example_compositor_fusion_exe = executable('example_compositor_fusion',
+    'example_compositor_fusion.cpp',
+    dependencies : nisaba_dep
+  )
+endif

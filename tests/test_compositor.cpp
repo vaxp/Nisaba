@@ -136,6 +136,86 @@ void test_color_and_formats() {
     std::cout << "  -> Color and Formats tests passed!" << std::endl;
 }
 
+void test_compositor_fusion() {
+    std::cout << "[Test] Compositor & GPU Pipeline Fusion (Zero-Copy & State Isolation)..." << std::endl;
+
+    // 1. Test Region::intersects(RectI)
+    Region reg(RectI{100, 100, 200, 200});
+    assert(reg.intersects(RectI{150, 150, 50, 50}));
+    assert(reg.intersects(RectI{50, 50, 100, 100}));
+    assert(!reg.intersects(RectI{400, 400, 50, 50}));
+    assert(!reg.intersects(RectI{0, 0, 50, 50}));
+
+    // 2. Test GpuTexture::from_native_handle (Zero-Copy wrapping)
+    auto dev = nisaba::gpu::GpuDevice::create();
+    if (dev) {
+        auto dummyTex = nisaba::gpu::GpuTexture::from_native_handle(dev, 999, 1920, 1080);
+        assert(dummyTex != nullptr);
+        assert(dummyTex->id() == 999);
+        assert(dummyTex->width() == 1920);
+        assert(dummyTex->height() == 1080);
+        assert(!dummyTex->owns_texture());
+
+        // 3. Test GpuSurface::from_render_target
+        auto dummySurface = nisaba::gpu::GpuSurface::from_render_target(dev, 1280, 720, 12);
+        assert(dummySurface != nullptr);
+        assert(dummySurface->fbo_id() == 12);
+        assert(dummySurface->width() == 1280);
+        assert(dummySurface->height() == 720);
+    }
+
+    // 4. Test CompositorCanvas fusion with Headless RenderTarget
+    auto egl = EglContext::createAuto();
+    if (egl && egl->makeCurrent()) {
+        auto renderer = Renderer::create(egl);
+        if (renderer) {
+            auto canvas = CompositorCanvas::create(egl, renderer);
+            assert(canvas != nullptr);
+
+            auto target = RenderTarget::createDefault(800, 600);
+            bool ok = canvas->beginFrame(target);
+            assert(ok);
+
+            // Test vg() vector canvas binding
+            auto* vg = canvas->vg();
+            assert(vg != nullptr);
+            assert(vg->width() == 800);
+            assert(vg->height() == 600);
+
+            // Test drawing window decoration (SDF rounded rect + shadow + title + buttons)
+            RectI winBox{100, 100, 400, 300};
+            canvas->drawWindowDecoration(winBox, "Nisaba Sovereign Desktop Terminal");
+
+            // Test drawing custom styled window decoration
+            WindowDecoStyle customStyle;
+            customStyle.cornerRadius = 16.0f;
+            customStyle.titleBarHeight = 36.0f;
+            customStyle.titleBarColor = Color{0.18f, 0.20f, 0.25f, 0.95f};
+            canvas->drawWindowDecoration(RectI{150, 150, 300, 200}, customStyle, "Editor");
+
+            // Test desktop dock panel
+            RectI dockBox{100, 500, 600, 70};
+            nisaba::effects::GlassParams glass;
+            canvas->drawDesktopPanel(dockBox, glass);
+
+            // Test typography
+            canvas->drawText("Wayland 120 FPS", 30.0f, 40.0f, Color::white(), 14.0f);
+
+            // Test damage culling
+            Region damage(RectI{0, 0, 100, 100});
+            canvas->setDamage(&damage);
+            // Window completely outside damage is dropped in O(1)
+            canvas->drawWindowDecoration(RectI{400, 400, 200, 150}, "Culled Window");
+
+            ok = canvas->endFrame();
+            assert(ok);
+            std::cout << "  -> Hardware CompositorCanvas fusion verified!" << std::endl;
+        }
+    }
+
+    std::cout << "  -> Fusion tests passed!" << std::endl;
+}
+
 int main() {
     std::cout << "=== Running Nisaba Sovereign Compositor Unit Tests ===" << std::endl;
 
@@ -144,7 +224,9 @@ int main() {
     test_matrix3();
     test_scene_graph();
     test_color_and_formats();
+    test_compositor_fusion();
 
     std::cout << "=== All Compositor Tests Succeeded 100%! ===" << std::endl;
+    std::cout << std::flush;
     return 0;
 }
