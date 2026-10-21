@@ -231,6 +231,23 @@ if get_option('enable_markdown') and get_option('enable_pdf')
   )
 endif
 
+if get_option('enable_physics')
+  add_project_arguments('-DNISABA_HAS_PHYSICS=1', language: ['c', 'cpp'])
+  nisaba_sources += files(
+    'src/physics/math/physics_math.cpp',
+    'src/physics/body/body.cpp',
+    'src/physics/collision/shape.cpp',
+    'src/physics/collision/gjk.cpp',
+    'src/physics/collision/epa.cpp',
+    'src/physics/collision/narrow_phase.cpp',
+    'src/physics/solver/impulse_solver.cpp',
+    'src/physics/scene/physics_scene.cpp',
+    'src/physics/scene/island.cpp',
+    'src/physics/broadphase/broad_phase.cpp',
+  )
+endif
+
+
 nisaba_lib = both_libraries('nisaba',
   nisaba_sources,
   include_directories : nisaba_inc,

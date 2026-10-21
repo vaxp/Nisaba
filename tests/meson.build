@@ -311,4 +311,55 @@ if get_option('enable_compositor')
   test('compositor_test', test_compositor_exe)
 endif
 
+if get_option('enable_physics')
+  test_physics_math_exe = executable('test_physics_math',
+    'test_physics_math.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_math_test', test_physics_math_exe)
+
+  test_physics_body_exe = executable('test_physics_body',
+    'test_physics_body.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_body_test', test_physics_body_exe)
+
+  test_physics_contact_exe = executable('test_physics_contact',
+    'test_physics_contact.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_contact_test', test_physics_contact_exe)
+
+  test_physics_solver_exe = executable('test_physics_solver',
+    'test_physics_solver.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_solver_test', test_physics_solver_exe)
+
+  test_physics_broadphase_exe = executable('test_physics_broadphase',
+    'test_physics_broadphase.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_broadphase_test', test_physics_broadphase_exe)
+
+  test_physics_gjk_epa_exe = executable('test_physics_gjk_epa',
+    'test_physics_gjk_epa.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_gjk_epa_test', test_physics_gjk_epa_exe)
+
+  test_physics_island_exe = executable('test_physics_island',
+    'test_physics_island.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_island_test', test_physics_island_exe)
+
+  test_physics_scene_integration_exe = executable('test_physics_scene_integration',
+    'test_physics_scene_integration.cpp',
+    dependencies : nisaba_dep
+  )
+  test('physics_scene_integration_test', test_physics_scene_integration_exe)
+endif
+
+
 

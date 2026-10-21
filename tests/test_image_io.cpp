@@ -41,7 +41,7 @@ void test_format_detection_and_auto_io() {
     assert(loaded_jpg->height() == h);
 
     // Save as WebP via auto extension
-    std::string webp_path = "/home/x/Desktop/nisaba/showcase/test_unified_auto.webp";
+    std::string webp_path = "/tmp/test_unified_auto.webp";
     bool ok_webp = pixmap.save_image(webp_path);
     assert(ok_webp);
 
