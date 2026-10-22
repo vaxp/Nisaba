@@ -1398,6 +1398,7 @@ int GL3Renderer::createTexture(TextureType type, int width, int height, int imag
 	tex->height = height;
 	tex->type = type;
 	tex->flags = imageFlags;
+	glActiveTexture(GL_TEXTURE0);
 	m_impl->bindTexture(tex->tex);
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -1456,7 +1457,10 @@ bool GL3Renderer::updateTexture(int image, int x, int y, int width, int height, 
 	Texture* tex = m_impl->findTexture(image);
 	if (!tex) return false;
 
-	m_impl->bindTexture(tex->tex);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, tex->tex);
+	m_impl->boundTexture = tex->tex;
+
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, tex->width);
 	glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
@@ -1473,7 +1477,8 @@ bool GL3Renderer::updateTexture(int image, int x, int y, int width, int height, 
 	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
 	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
-	m_impl->bindTexture(0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	m_impl->boundTexture = 0;
 	return true;
 }
 

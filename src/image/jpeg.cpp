@@ -1,4 +1,5 @@
 #include "nisaba/image/jpeg.hpp"
+#include <iostream>
 #include <fstream>
 #include <cstring>
 #include <cmath>
@@ -187,24 +188,40 @@ public:
 
     inline void refill() noexcept {
         while (bit_count_ <= 48 && ptr_ < end_) {
-            uint8_t b = *ptr_++;
-            if (b == 0xFF) {
-                if (ptr_ < end_) {
-                    uint8_t marker = *ptr_++;
+            if (*ptr_ == 0xFF) {
+                if (ptr_ + 1 < end_) {
+                    uint8_t marker = ptr_[1];
                     if (marker == 0x00) {
-                        b = 0xFF; // Stuffed byte
-                    } else if (marker >= 0xD0 && marker <= 0xD7) {
-                        rst_marker_ = marker;
-                        b = 0xFF;
-                    } else if (marker == 0xD9) {
-                        ptr_ = end_;
-                        b = 0xFF;
+                        ptr_ += 2;
+                        bit_buf_ = (bit_buf_ << 8) | 0xFF;
+                        bit_count_ += 8;
+                        continue;
+                    }
+                    if ((marker >= 0xD0 && marker <= 0xD7) || marker == 0xD9) {
+                        // Marker encountered: Stop refilling so caller can handle boundary
+                        break;
                     }
                 }
             }
+            uint8_t b = *ptr_++;
             bit_buf_ = (bit_buf_ << 8) | b;
             bit_count_ += 8;
         }
+    }
+
+    void restart() noexcept {
+        bit_count_ = 0;
+        bit_buf_ = 0;
+        while (ptr_ < end_) {
+            if (*ptr_ == 0xFF) {
+                if (ptr_ + 1 < end_ && ptr_[1] >= 0xD0 && ptr_[1] <= 0xD7) {
+                    ptr_ += 2;
+                    break;
+                }
+            }
+            ++ptr_;
+        }
+        refill();
     }
 
     inline uint32_t peek_bits(int n) noexcept {
@@ -780,6 +797,8 @@ ImageResult<Pixmap> decode_jpeg(std::span<const uint8_t> jpeg_data) {
     uint32_t mcu_cols = (width + mcu_w - 1) / mcu_w;
     uint32_t mcu_rows = (height + mcu_h - 1) / mcu_h;
 
+    uint32_t mcu_count = 0;
+
     JpegBitReader reader(jpeg_data.subspan(sos_offset));
 
     auto decode_block = [&](Component& comp, uint8_t block_out[64]) -> bool {
@@ -838,8 +857,6 @@ ImageResult<Pixmap> decode_jpeg(std::span<const uint8_t> jpeg_data) {
         return true;
     };
 
-    uint32_t mcu_count = 0;
-
     PremultipliedColorU8* pix_base = pixmap.pixels_mut();
 
     if (components.size() == 1) {
@@ -850,7 +867,7 @@ ImageResult<Pixmap> decode_jpeg(std::span<const uint8_t> jpeg_data) {
         for (uint32_t my = 0; my < mcu_rows; ++my) {
             for (uint32_t mx = 0; mx < mcu_cols; ++mx) {
                 if (restart_interval > 0 && mcu_count > 0 && (mcu_count % restart_interval == 0)) {
-                    reader.align_to_byte();
+                    reader.restart();
                     comp.dc_pred = 0;
                 }
                 if (!decode_block(comp, block)) {
@@ -890,7 +907,7 @@ ImageResult<Pixmap> decode_jpeg(std::span<const uint8_t> jpeg_data) {
         for (uint32_t my = 0; my < mcu_rows; ++my) {
             for (uint32_t mx = 0; mx < mcu_cols; ++mx) {
                 if (restart_interval > 0 && mcu_count > 0 && (mcu_count % restart_interval == 0)) {
-                    reader.align_to_byte();
+                    reader.restart();
                     for (auto& comp : components) comp.dc_pred = 0;
                 }
 

@@ -53,6 +53,16 @@ if get_option('enable_gpu')
     dependencies : [nisaba_dep, extra_deps]
   )
 
+  showcase_gpu_3d_physics_exe = executable('showcase_gpu_3d_physics',
+    'showcase_gpu_3d_physics.cpp',
+    dependencies : [nisaba_dep, extra_deps]
+  )
+
+  showcase_gltf_model_exe = executable('showcase_gltf_model',
+    'showcase_gltf_model.cpp',
+    dependencies : [nisaba_dep, extra_deps]
+  )
+
   if get_option('enable_backend_os')
     example_ecommerce_exe = executable('example_ecommerce',
       'example_ecommerce.cpp',
@@ -120,6 +130,12 @@ if get_option('enable_gpu')
 
     showcase_runtime_shaders_exe = executable('showcase_runtime_shaders',
       'showcase_runtime_shaders.cpp',
+      cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
+      dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
+    )
+
+    showcase_3d_walkthrough_exe = executable('showcase_3d_walkthrough',
+      'showcase_3d_walkthrough.cpp',
       cpp_args : ['-DNISABA_HAS_BACKEND_OS=1'],
       dependencies : [nisaba_dep, extra_deps, nisaba_backend_os_dep]
     )

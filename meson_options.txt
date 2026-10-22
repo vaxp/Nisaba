@@ -12,4 +12,5 @@ option('enable_markdown', type : 'boolean', value : true, description : 'Enable 
 option('enable_pdf', type : 'boolean', value : true, description : 'Enable sovereign nisaba-pdf document engine')
 option('enable_compositor', type : 'boolean', value : true, description : 'Enable native Wayland compositor pipeline and DRM/GBM/DMA-BUF hardware support')
 option('enable_physics', type : 'boolean', value : true, description : 'Enable sovereign 3D physics and rigid body simulation pipeline')
+option('enable_render3d', type : 'boolean', value : true, description : 'Enable sovereign 3D PBR rendering and graphics pipeline')
 

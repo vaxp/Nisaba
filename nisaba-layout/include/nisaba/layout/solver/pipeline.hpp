@@ -83,7 +83,7 @@ struct LayoutContext {
 };
 
 /**
- * Clean-Room 7-Stage CSS Flexbox Pipeline Engine.
+ * Sovereign 7-Stage CSS Flexbox Pipeline Engine.
  * Implements the W3C CSS Flexible Box Layout Module Level 1 specification.
  */
 class LAYOUT_EXPORT LayoutPipeline {

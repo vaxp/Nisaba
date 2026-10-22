@@ -247,6 +247,37 @@ if get_option('enable_physics')
   )
 endif
 
+if get_option('enable_render3d')
+  add_project_arguments('-DNISABA_HAS_RENDER3D=1', language: ['c', 'cpp'])
+  nisaba_sources += files(
+    'src/render3d/camera/frustum.cpp',
+    'src/render3d/camera/camera.cpp',
+    'src/render3d/camera/orbit_controller.cpp',
+    'src/render3d/geometry/mesh.cpp',
+    'src/render3d/geometry/primitives.cpp',
+    'src/render3d/material/texture.cpp',
+    'src/render3d/material/pbr_material.cpp',
+    'src/render3d/material/brdf.cpp',
+    'src/render3d/lighting/light.cpp',
+    'src/render3d/lighting/shadow_map.cpp',
+    'src/render3d/scene/renderable.cpp',
+    'src/render3d/scene/scene.cpp',
+    'src/render3d/scene/view.cpp',
+    'src/render3d/scene/renderer.cpp',
+    'src/render3d/bridge/physics_bridge.cpp',
+    'src/render3d/animation/skeleton.cpp',
+    'src/render3d/animation/animation_clip.cpp',
+    'src/render3d/animation/animator.cpp',
+    'src/render3d/animation/skinned_mesh.cpp',
+    'src/render3d/gltf/gltf_loader.cpp',
+    'src/render3d/gpu/gl_shader_program.cpp',
+    'src/render3d/gpu/gl_state_guard.cpp',
+    'src/render3d/gpu/gpu_resource_cache.cpp',
+    'src/render3d/gpu/gpu_shadow_pass.cpp',
+    'src/render3d/gpu/gpu_backend3d.cpp',
+    'src/render3d/gpu/render_surface3d.cpp',
+  )
+endif
 
 nisaba_lib = both_libraries('nisaba',
   nisaba_sources,

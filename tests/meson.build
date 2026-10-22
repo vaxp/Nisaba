@@ -361,5 +361,58 @@ if get_option('enable_physics')
   test('physics_scene_integration_test', test_physics_scene_integration_exe)
 endif
 
+if get_option('enable_render3d')
+  test_render3d_camera_exe = executable('test_render3d_camera',
+    'test_render3d_camera.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_camera_test', test_render3d_camera_exe)
+
+  test_render3d_geometry_exe = executable('test_render3d_geometry',
+    'test_render3d_geometry.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_geometry_test', test_render3d_geometry_exe)
+
+  test_render3d_material_exe = executable('test_render3d_material',
+    'test_render3d_material.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_material_test', test_render3d_material_exe)
+
+  test_render3d_lighting_exe = executable('test_render3d_lighting',
+    'test_render3d_lighting.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_lighting_test', test_render3d_lighting_exe)
+
+  test_render3d_renderer_exe = executable('test_render3d_renderer',
+    'test_render3d_renderer.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_renderer_test', test_render3d_renderer_exe)
+
+  test_render3d_gltf_physics_exe = executable('test_render3d_gltf_physics',
+    'test_render3d_gltf_physics.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_gltf_physics_test', test_render3d_gltf_physics_exe)
+
+  test_render3d_animation_exe = executable('test_render3d_animation',
+    'test_render3d_animation.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_animation_test', test_render3d_animation_exe)
+
+  if get_option('enable_gpu')
+    test_render3d_gpu_backend_exe = executable('test_render3d_gpu_backend',
+      'test_render3d_gpu_backend.cpp',
+      dependencies : [nisaba_dep, extra_deps]
+    )
+    test('render3d_gpu_backend_test', test_render3d_gpu_backend_exe)
+  endif
+endif
+
+
 
 
