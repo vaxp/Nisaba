@@ -63,6 +63,11 @@ if get_option('enable_gpu')
     dependencies : [nisaba_dep, extra_deps]
   )
 
+  showcase_advanced_pbr_exe = executable('showcase_advanced_pbr',
+    'showcase_advanced_pbr.cpp',
+    dependencies : [nisaba_dep, extra_deps]
+  )
+
   if get_option('enable_backend_os')
     example_ecommerce_exe = executable('example_ecommerce',
       'example_ecommerce.cpp',

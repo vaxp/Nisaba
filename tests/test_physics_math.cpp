@@ -1,9 +1,10 @@
-#include "nisaba/physics/math.hpp"
+#include "orion/math/math.hpp"
 #include <cassert>
 #include <iostream>
 #include <iomanip>
 
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 
 static int g_tests_passed = 0;
 static int g_tests_total = 0;

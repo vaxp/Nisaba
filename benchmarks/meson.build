@@ -13,6 +13,11 @@ benchmark_damage_tracking_exe = executable('benchmark_damage_tracking',
   dependencies : nisaba_dep
 )
 
+benchmark_render3d_pbr_exe = executable('benchmark_render3d_pbr',
+  'benchmark_render3d_pbr.cpp',
+  dependencies : [nisaba_dep, extra_deps]
+)
+
 
 cairo_dep = dependency('cairo', required : false)
 if cairo_dep.found()

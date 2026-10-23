@@ -152,7 +152,7 @@ void test_dynamic_slot_update_clipping() {
 
     // Draw into dynamic slot, intentionally trying to draw a huge rect (0,0, 400,300) in green
     Canvas live_canvas(target);
-    surface->update_slot_cpu("display", live_canvas, [](Canvas& c, const Rect& bounds) {
+    surface->update_slot_cpu("display", live_canvas, [](Canvas& c, [[maybe_unused]] const Rect& bounds) {
         // Attempting to draw oversized rectangle
         c.fill_rect(*Rect::from_xywh(0, 0, 400, 300), Paint(Color::from_rgba8(0, 255, 0, 255)));
     });

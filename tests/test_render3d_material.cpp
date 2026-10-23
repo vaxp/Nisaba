@@ -1,12 +1,12 @@
-#include "nisaba/render3d/render3d.hpp"
+#include "orion/orion.hpp"
 #include <cassert>
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 #include <cstring>
 
-using namespace nisaba::render3d;
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 
 static int g_tests_passed = 0;
 static int g_tests_total = 0;
@@ -71,7 +71,7 @@ void test_texture2d_creation_and_sampling() {
 void test_pbr_material_uniforms_layout() {
     std::cout << "[*] Testing PbrMaterial uniform packing & std140 layout..." << std::endl;
 
-    TEST_ASSERT(sizeof(PbrMaterialUniforms) == 64, "PbrMaterialUniforms must be exactly 64 bytes");
+    TEST_ASSERT(sizeof(PbrMaterialUniforms) == 144, "PbrMaterialUniforms must be exactly 144 bytes");
     TEST_ASSERT(alignof(PbrMaterialUniforms) == 16, "PbrMaterialUniforms must be 16-byte aligned");
 
     PbrMaterial mat;
@@ -99,6 +99,98 @@ void test_pbr_material_uniforms_layout() {
     TEST_ASSERT(approx(u.emissive[0], 2.0f), "Packed emissive R");
     TEST_ASSERT(approx(u.normal_scale, 1.5f), "Packed normal scale");
     TEST_ASSERT(u.texture_flags == flags, "Uniform texture flags match");
+    TEST_ASSERT(u.shading_model == static_cast<uint32_t>(ShadingModel::Standard), "Default shading model is Standard");
+}
+
+void test_advanced_shading_models_creation() {
+    std::cout << "[*] Testing specialized PBR material models creation & parameter packing..." << std::endl;
+
+    // 1. Clear Coat
+    auto coat = PbrMaterial::create_clear_coat(Vec4(0.9f, 0.2f, 0.2f, 1.0f), 0.95f, 0.03f);
+    TEST_ASSERT(coat->shading_model == ShadingModel::ClearCoat, "ClearCoat shading model set");
+    TEST_ASSERT(approx(coat->clear_coat, 0.95f), "Clear coat intensity set");
+    TEST_ASSERT(approx(coat->clear_coat_roughness, 0.03f), "Clear coat roughness set");
+    auto u_coat = coat->get_uniforms();
+    TEST_ASSERT(u_coat.shading_model == static_cast<uint32_t>(ShadingModel::ClearCoat), "ClearCoat uniform shading model packed");
+    TEST_ASSERT(approx(u_coat.clear_coat, 0.95f), "ClearCoat uniform factor packed");
+    TEST_ASSERT(approx(u_coat.clear_coat_roughness, 0.03f), "ClearCoat uniform roughness packed");
+
+    // 2. Anisotropic
+    auto aniso = PbrMaterial::create_anisotropic(Vec4(0.8f, 0.8f, 0.85f, 1.0f), 0.8f, 0.2f);
+    TEST_ASSERT(aniso->shading_model == ShadingModel::Anisotropic, "Anisotropic shading model set");
+    TEST_ASSERT(approx(aniso->anisotropy, 0.8f), "Anisotropy factor set");
+    auto u_aniso = aniso->get_uniforms();
+    TEST_ASSERT(u_aniso.shading_model == static_cast<uint32_t>(ShadingModel::Anisotropic), "Anisotropic uniform shading model packed");
+    TEST_ASSERT(approx(u_aniso.anisotropy, 0.8f), "Anisotropy uniform factor packed");
+
+    // 3. Cloth & Sheen
+    auto cloth = PbrMaterial::create_cloth(Vec4(0.3f, 0.1f, 0.5f, 1.0f), Vec3(0.9f, 0.7f, 1.0f), 0.35f);
+    TEST_ASSERT(cloth->shading_model == ShadingModel::Cloth, "Cloth shading model set");
+    TEST_ASSERT(approx(cloth->sheen_roughness, 0.35f), "Sheen roughness set");
+    auto u_cloth = cloth->get_uniforms();
+    TEST_ASSERT(u_cloth.shading_model == static_cast<uint32_t>(ShadingModel::Cloth), "Cloth uniform shading model packed");
+    TEST_ASSERT(approx(u_cloth.sheen_color[0], 0.9f), "Sheen color R packed");
+
+    // 4. Subsurface Scattering
+    auto sss = PbrMaterial::create_subsurface(Vec4(0.9f, 0.7f, 0.6f, 1.0f), Vec3(0.85f, 0.2f, 0.1f), 0.4f);
+    TEST_ASSERT(sss->shading_model == ShadingModel::Subsurface, "Subsurface shading model set");
+    TEST_ASSERT(approx(sss->thickness, 0.4f), "Thickness set");
+    auto u_sss = sss->get_uniforms();
+    TEST_ASSERT(u_sss.shading_model == static_cast<uint32_t>(ShadingModel::Subsurface), "Subsurface uniform shading model packed");
+    TEST_ASSERT(approx(u_sss.thickness, 0.4f), "Thickness packed");
+
+    // 5. Glass / Transmission
+    auto glass = PbrMaterial::create_glass(1.52f, Vec3(0.95f, 0.98f, 1.0f));
+    TEST_ASSERT(glass->shading_model == ShadingModel::Transmission, "Transmission shading model set");
+    TEST_ASSERT(glass->is_transparent(), "Glass is detected as transparent");
+    auto u_glass = glass->get_uniforms();
+    TEST_ASSERT(u_glass.shading_model == static_cast<uint32_t>(ShadingModel::Transmission), "Transmission uniform shading model packed");
+    TEST_ASSERT(approx(u_glass.transmission, 1.0f), "Transmission factor packed");
+    TEST_ASSERT(approx(u_glass.ior, 1.52f), "IOR packed");
+
+    // 6. Unlit
+    auto unlit = PbrMaterial::create_unlit(Vec4(0.0f, 1.0f, 0.5f, 1.0f), Vec3(0.1f, 0.5f, 0.2f));
+    TEST_ASSERT(unlit->shading_model == ShadingModel::Unlit, "Unlit shading model set");
+    auto u_unlit = unlit->get_uniforms();
+    TEST_ASSERT(u_unlit.shading_model == static_cast<uint32_t>(ShadingModel::Unlit), "Unlit uniform shading model packed");
+}
+
+void test_advanced_brdf_evaluations() {
+    std::cout << "[*] Testing advanced analytical BRDF functions (Charlie, Kelemen, Neubelt, Anisotropic)..." << std::endl;
+
+    const Vec3 n(0.0f, 1.0f, 0.0f);
+    const Vec3 v(0.0f, 1.0f, 0.0f);
+    const Vec3 l(0.0f, 1.0f, 0.0f);
+    const Vec3 t(1.0f, 0.0f, 0.0f);
+    const Vec3 b(0.0f, 0.0f, 1.0f);
+
+    // Charlie sheen test
+    float d_charlie = CookTorranceBRDF::distribution_charlie(1.0f, 0.3f);
+    TEST_ASSERT(d_charlie > 0.0f, "Charlie NDF yields positive value");
+
+    // Neubelt visibility
+    float v_neubelt = CookTorranceBRDF::visibility_neubelt(1.0f, 1.0f);
+    TEST_ASSERT(v_neubelt > 0.0f && v_neubelt <= 1.0f, "Neubelt visibility is valid");
+
+    // Kelemen visibility
+    float v_kelemen = CookTorranceBRDF::visibility_kelemen(1.0f);
+    TEST_ASSERT(approx(v_kelemen, 0.25f), "Kelemen visibility at normal incidence equals 0.25");
+
+    // Clear coat evaluation
+    Vec3 coat_eval = CookTorranceBRDF::evaluate_clear_coat(n, v, l, 1.0f, 0.04f);
+    TEST_ASSERT(coat_eval.x > 0.0f, "ClearCoat specular produces positive radiance");
+
+    // Cloth evaluation
+    Vec3 cloth_eval = CookTorranceBRDF::evaluate_cloth(n, v, l, Vec3(0.5f, 0.2f, 0.2f), Vec3(0.9f, 0.8f, 0.8f), 0.3f);
+    TEST_ASSERT(cloth_eval.x > 0.0f, "Cloth BRDF produces positive radiance");
+
+    // Anisotropic evaluation
+    Vec3 aniso_eval = CookTorranceBRDF::evaluate_anisotropic(n, t, b, v, l, Vec3(0.8f, 0.8f, 0.8f), 0.9f, 0.2f, 0.8f);
+    TEST_ASSERT(aniso_eval.x > 0.0f, "Anisotropic BRDF produces positive radiance");
+
+    // Subsurface evaluation
+    Vec3 sss_eval = CookTorranceBRDF::evaluate_subsurface(n, v, l, Vec3(0.8f, 0.6f, 0.5f), Vec3(0.9f, 0.2f, 0.1f), 0.3f, 12.0f);
+    TEST_ASSERT(sss_eval.x > 0.0f, "Subsurface BRDF produces positive radiance");
 }
 
 void test_brdf_ggx_distribution() {
@@ -188,6 +280,8 @@ int main() {
 
     test_texture2d_creation_and_sampling();
     test_pbr_material_uniforms_layout();
+    test_advanced_shading_models_creation();
+    test_advanced_brdf_evaluations();
     test_brdf_ggx_distribution();
     test_brdf_geometry_smith();
     test_brdf_fresnel_schlick();

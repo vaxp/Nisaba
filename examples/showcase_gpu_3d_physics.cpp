@@ -3,17 +3,17 @@
 #include <cmath>
 
 #include "nisaba/gpu/gpu_device.hpp"
-#include "nisaba/render3d/render3d.hpp"
-#include "nisaba/physics/scene/physics_scene.hpp"
-#include "nisaba/physics/collision/box_shape.hpp"
-#include "nisaba/physics/collision/sphere_shape.hpp"
-#include "nisaba/physics/collision/cylinder_shape.hpp"
-#include "nisaba/physics/collision/plane_shape.hpp"
+#include "orion/orion.hpp"
+#include "orion/physics/scene/physics_scene.hpp"
+#include "orion/physics/collision/box_shape.hpp"
+#include "orion/physics/collision/sphere_shape.hpp"
+#include "orion/physics/collision/cylinder_shape.hpp"
+#include "orion/physics/collision/plane_shape.hpp"
 #include "nisaba/image/image_io.hpp"
 
 using namespace nisaba;
-using namespace nisaba::render3d;
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 using nisaba::gpu::GpuDevice;
 
 int main() {

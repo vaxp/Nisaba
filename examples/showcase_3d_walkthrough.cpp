@@ -8,11 +8,11 @@
 #include <cstring>
 #include <cstdio>
 
-#include "nisaba/render3d/render3d.hpp"
-#include "nisaba/physics/physics.hpp"
-#include "nisaba/render3d/gltf/gltf_loader.hpp"
-#include "nisaba/render3d/gpu/gpu_backend3d.hpp"
-#include "nisaba/render3d/camera/orbit_controller.hpp"
+#include "orion/orion.hpp"
+#include "orion/physics/physics.hpp"
+#include "orion/gltf/gltf_loader.hpp"
+#include "orion/gpu/gpu_backend3d.hpp"
+#include "orion/camera/orbit_controller.hpp"
 
 #include "nisaba/gpu/context.hpp"
 #include "nisaba/gpu/gl3_renderer.hpp"
@@ -29,7 +29,7 @@
 #include <EGL/egl.h>
 
 using namespace nisaba;
-using namespace nisaba::render3d;
+using namespace orion;
 
 namespace {
 
@@ -454,34 +454,34 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------
     // 8. Sovereign 3D Physics Simulation & Environment Colliders
     // -----------------------------------------------------------------
-    nisaba::physics::PhysicsSettings phys_settings;
-    phys_settings.gravity = nisaba::physics::Vec3(0.0f, -14.0f, 0.0f);
-    nisaba::physics::PhysicsScene physics_scene(phys_settings);
+    orion::physics::PhysicsSettings phys_settings;
+    phys_settings.gravity = orion::Vec3(0.0f, -14.0f, 0.0f);
+    orion::physics::PhysicsScene physics_scene(phys_settings);
     PhysicsRenderBridge physics_bridge;
 
     // Retain collision shapes in memory
-    std::vector<std::shared_ptr<nisaba::physics::Shape>> collision_shapes;
+    std::vector<std::shared_ptr<orion::physics::Shape>> collision_shapes;
 
     auto add_static_box = [&](const Vec3& pos, const Vec3& half_size) {
-        auto shape = std::make_shared<nisaba::physics::BoxShape>(
-            nisaba::physics::Vec3(half_size.x, half_size.y, half_size.z)
+        auto shape = std::make_shared<orion::physics::BoxShape>(
+            orion::Vec3(half_size.x, half_size.y, half_size.z)
         );
         collision_shapes.push_back(shape);
-        nisaba::physics::BodyCreationSettings b_set;
-        b_set.position = nisaba::physics::Vec3(pos.x, pos.y, pos.z);
+        orion::physics::BodyCreationSettings b_set;
+        b_set.position = orion::Vec3(pos.x, pos.y, pos.z);
         b_set.shape = shape.get();
-        b_set.motion_type = nisaba::physics::MotionType::Static;
+        b_set.motion_type = orion::physics::MotionType::Static;
         b_set.friction = 0.5f;
         (void)physics_scene.create_body(b_set);
     };
 
     auto add_static_cylinder = [&](const Vec3& pos, float half_height, float radius_val) {
-        auto shape = std::make_shared<nisaba::physics::CylinderShape>(half_height, radius_val);
+        auto shape = std::make_shared<orion::physics::CylinderShape>(half_height, radius_val);
         collision_shapes.push_back(shape);
-        nisaba::physics::BodyCreationSettings b_set;
-        b_set.position = nisaba::physics::Vec3(pos.x, pos.y, pos.z);
+        orion::physics::BodyCreationSettings b_set;
+        b_set.position = orion::Vec3(pos.x, pos.y, pos.z);
         b_set.shape = shape.get();
-        b_set.motion_type = nisaba::physics::MotionType::Static;
+        b_set.motion_type = orion::physics::MotionType::Static;
         b_set.friction = 0.5f;
         (void)physics_scene.create_body(b_set);
     };
@@ -528,12 +528,12 @@ int main(int argc, char** argv) {
         emerald_mat->roughness_factor = 0.3f;
 
         // Dynamic Crate 1
-        auto crate_shape1 = std::make_shared<nisaba::physics::BoxShape>(nisaba::physics::Vec3(0.35f, 0.35f, 0.35f));
+        auto crate_shape1 = std::make_shared<orion::physics::BoxShape>(orion::Vec3(0.35f, 0.35f, 0.35f));
         collision_shapes.push_back(crate_shape1);
-        nisaba::physics::BodyCreationSettings c1_set;
-        c1_set.position = nisaba::physics::Vec3(-2.8f, 0.6f, -0.6f);
+        orion::physics::BodyCreationSettings c1_set;
+        c1_set.position = orion::Vec3(-2.8f, 0.6f, -0.6f);
         c1_set.shape = crate_shape1.get();
-        c1_set.motion_type = nisaba::physics::MotionType::Dynamic;
+        c1_set.motion_type = orion::physics::MotionType::Dynamic;
         c1_set.override_mass = 12.0f;
         c1_set.friction = 0.5f;
         c1_set.restitution = 0.15f;
@@ -541,12 +541,12 @@ int main(int argc, char** argv) {
         (void)physics_bridge.create_and_bind(physics_scene, c1_id, red_mat, scene.get());
 
         // Dynamic Crate 2
-        auto crate_shape2 = std::make_shared<nisaba::physics::BoxShape>(nisaba::physics::Vec3(0.35f, 0.35f, 0.35f));
+        auto crate_shape2 = std::make_shared<orion::physics::BoxShape>(orion::Vec3(0.35f, 0.35f, 0.35f));
         collision_shapes.push_back(crate_shape2);
-        nisaba::physics::BodyCreationSettings c2_set;
-        c2_set.position = nisaba::physics::Vec3(1.5f, 0.6f, 0.7f);
+        orion::physics::BodyCreationSettings c2_set;
+        c2_set.position = orion::Vec3(1.5f, 0.6f, 0.7f);
         c2_set.shape = crate_shape2.get();
-        c2_set.motion_type = nisaba::physics::MotionType::Dynamic;
+        c2_set.motion_type = orion::physics::MotionType::Dynamic;
         c2_set.override_mass = 12.0f;
         c2_set.friction = 0.5f;
         c2_set.restitution = 0.15f;
@@ -554,12 +554,12 @@ int main(int argc, char** argv) {
         (void)physics_bridge.create_and_bind(physics_scene, c2_id, blue_mat, scene.get());
 
         // Dynamic Gold Ball
-        auto ball_shape = std::make_shared<nisaba::physics::SphereShape>(0.42f);
+        auto ball_shape = std::make_shared<orion::physics::SphereShape>(0.42f);
         collision_shapes.push_back(ball_shape);
-        nisaba::physics::BodyCreationSettings b_set;
-        b_set.position = nisaba::physics::Vec3(-0.5f, 0.8f, 0.5f);
+        orion::physics::BodyCreationSettings b_set;
+        b_set.position = orion::Vec3(-0.5f, 0.8f, 0.5f);
         b_set.shape = ball_shape.get();
-        b_set.motion_type = nisaba::physics::MotionType::Dynamic;
+        b_set.motion_type = orion::physics::MotionType::Dynamic;
         b_set.override_mass = 8.0f;
         b_set.friction = 0.3f;
         b_set.restitution = 0.65f;
@@ -567,12 +567,12 @@ int main(int argc, char** argv) {
         (void)physics_bridge.create_and_bind(physics_scene, b_id, gold_mat, scene.get());
 
         // Dynamic Emerald Cylinder
-        auto cyl_shape = std::make_shared<nisaba::physics::CylinderShape>(0.45f, 0.30f);
+        auto cyl_shape = std::make_shared<orion::physics::CylinderShape>(0.45f, 0.30f);
         collision_shapes.push_back(cyl_shape);
-        nisaba::physics::BodyCreationSettings cyl_set;
-        cyl_set.position = nisaba::physics::Vec3(3.8f, 0.8f, -0.5f);
+        orion::physics::BodyCreationSettings cyl_set;
+        cyl_set.position = orion::Vec3(3.8f, 0.8f, -0.5f);
         cyl_set.shape = cyl_shape.get();
-        cyl_set.motion_type = nisaba::physics::MotionType::Dynamic;
+        cyl_set.motion_type = orion::physics::MotionType::Dynamic;
         cyl_set.override_mass = 15.0f;
         cyl_set.friction = 0.45f;
         cyl_set.restitution = 0.2f;
@@ -813,8 +813,8 @@ int main(int argc, char** argv) {
                         const auto* shape = body->get_shape();
                         const auto b_pos = body->get_position();
 
-                        if (shape->get_type() == nisaba::physics::ShapeType::Box) {
-                            const auto* box = static_cast<const nisaba::physics::BoxShape*>(shape);
+                        if (shape->get_type() == orion::physics::ShapeType::Box) {
+                            const auto* box = static_cast<const orion::physics::BoxShape*>(shape);
                             const auto h = box->half_extents;
                             float cx = std::clamp(p_center.x, b_pos.x - h.x, b_pos.x + h.x);
                             float cy = std::clamp(p_center.y, b_pos.y - h.y, b_pos.y + h.y);
@@ -837,21 +837,21 @@ int main(int argc, char** argv) {
                                     if (body->is_dynamic()) {
                                         auto* mut_body = physics_scene.get_body_by_slot(static_cast<uint32_t>(s_i));
                                         if (mut_body) {
-                                            mut_body->apply_impulse(nisaba::physics::Vec3(target_vel.x, 0.4f, target_vel.z) * (18.0f * dt));
+                                            mut_body->apply_impulse(orion::Vec3(target_vel.x, 0.4f, target_vel.z) * (18.0f * dt));
                                         }
                                     }
                                 }
                             }
-                        } else if (shape->get_type() == nisaba::physics::ShapeType::Cylinder ||
-                                   shape->get_type() == nisaba::physics::ShapeType::Sphere) {
+                        } else if (shape->get_type() == orion::physics::ShapeType::Cylinder ||
+                                   shape->get_type() == orion::physics::ShapeType::Sphere) {
                             float obj_radius = 0.40f;
                             float obj_half_h = 3.0f;
-                            if (shape->get_type() == nisaba::physics::ShapeType::Cylinder) {
-                                const auto* cyl = static_cast<const nisaba::physics::CylinderShape*>(shape);
+                            if (shape->get_type() == orion::physics::ShapeType::Cylinder) {
+                                const auto* cyl = static_cast<const orion::physics::CylinderShape*>(shape);
                                 obj_radius = cyl->radius;
                                 obj_half_h = cyl->half_height;
                             } else {
-                                const auto* sph = static_cast<const nisaba::physics::SphereShape*>(shape);
+                                const auto* sph = static_cast<const orion::physics::SphereShape*>(shape);
                                 obj_radius = sph->radius;
                                 obj_half_h = sph->radius;
                             }
@@ -874,7 +874,7 @@ int main(int argc, char** argv) {
                                     if (body->is_dynamic()) {
                                         auto* mut_body = physics_scene.get_body_by_slot(static_cast<uint32_t>(s_i));
                                         if (mut_body) {
-                                            mut_body->apply_impulse(nisaba::physics::Vec3(target_vel.x, 0.6f, target_vel.z) * (20.0f * dt));
+                                            mut_body->apply_impulse(orion::Vec3(target_vel.x, 0.6f, target_vel.z) * (20.0f * dt));
                                         }
                                     }
                                 }

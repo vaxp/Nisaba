@@ -7,12 +7,12 @@
 #include <filesystem>
 
 #include "nisaba/gpu/gpu_device.hpp"
-#include "nisaba/render3d/render3d.hpp"
+#include "orion/orion.hpp"
 #include "nisaba/image/image_io.hpp"
 
 using namespace nisaba;
-using namespace nisaba::render3d;
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 
 int main(int argc, char** argv) {
     std::cout << "==========================================================" << std::endl;

@@ -1,4 +1,4 @@
-#include "nisaba/render3d/render3d.hpp"
+#include "orion/orion.hpp"
 #include <iostream>
 #include <cmath>
 #include <cassert>
@@ -12,7 +12,7 @@
         } \
     } while (0)
 
-using namespace nisaba::render3d;
+using namespace orion;
 
 int main() {
     std::cout << "===================================================\n"

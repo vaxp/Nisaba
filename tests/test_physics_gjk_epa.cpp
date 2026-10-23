@@ -1,10 +1,11 @@
-#include "nisaba/physics/physics.hpp"
+#include "orion/physics/physics.hpp"
 #include <cassert>
 #include <iostream>
 #include <cmath>
 #include <vector>
 
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 
 static int g_assert_count = 0;
 #define TEST_ASSERT(cond) do { \
@@ -16,9 +17,9 @@ static int g_assert_count = 0;
 } while(0)
 
 static bool approx_equal_vec3(const Vec3& a, const Vec3& b, float eps = 1e-3f) {
-    return nisaba::physics::approx_equal(a.x, b.x, eps) &&
-           nisaba::physics::approx_equal(a.y, b.y, eps) &&
-           nisaba::physics::approx_equal(a.z, b.z, eps);
+    return orion::approx_equal(a.x, b.x, eps) &&
+           orion::approx_equal(a.y, b.y, eps) &&
+           orion::approx_equal(a.z, b.z, eps);
 }
 
 void test_cylinder_shape() {

@@ -311,7 +311,7 @@ if get_option('enable_compositor')
   test('compositor_test', test_compositor_exe)
 endif
 
-if get_option('enable_physics')
+if get_option('enable_orion')
   test_physics_math_exe = executable('test_physics_math',
     'test_physics_math.cpp',
     dependencies : nisaba_dep
@@ -359,9 +359,7 @@ if get_option('enable_physics')
     dependencies : nisaba_dep
   )
   test('physics_scene_integration_test', test_physics_scene_integration_exe)
-endif
 
-if get_option('enable_render3d')
   test_render3d_camera_exe = executable('test_render3d_camera',
     'test_render3d_camera.cpp',
     dependencies : nisaba_dep
@@ -386,6 +384,24 @@ if get_option('enable_render3d')
   )
   test('render3d_lighting_test', test_render3d_lighting_exe)
 
+  test_render3d_lighting_clustered_exe = executable('test_render3d_lighting_clustered',
+    'test_render3d_lighting_clustered.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_lighting_clustered_test', test_render3d_lighting_clustered_exe)
+
+  test_render3d_ibl_exe = executable('test_render3d_ibl',
+    'test_render3d_ibl.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_ibl_test', test_render3d_ibl_exe)
+
+  test_render3d_shadows_exe = executable('test_render3d_shadows',
+    'test_render3d_shadows.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_shadows_test', test_render3d_shadows_exe)
+
   test_render3d_renderer_exe = executable('test_render3d_renderer',
     'test_render3d_renderer.cpp',
     dependencies : nisaba_dep
@@ -397,6 +413,12 @@ if get_option('enable_render3d')
     dependencies : nisaba_dep
   )
   test('render3d_gltf_physics_test', test_render3d_gltf_physics_exe)
+
+  test_render3d_gltf_extensions_exe = executable('test_render3d_gltf_extensions',
+    'test_render3d_gltf_extensions.cpp',
+    dependencies : nisaba_dep
+  )
+  test('render3d_gltf_extensions_test', test_render3d_gltf_extensions_exe)
 
   test_render3d_animation_exe = executable('test_render3d_animation',
     'test_render3d_animation.cpp',
@@ -410,6 +432,12 @@ if get_option('enable_render3d')
       dependencies : [nisaba_dep, extra_deps]
     )
     test('render3d_gpu_backend_test', test_render3d_gpu_backend_exe)
+
+    test_render3d_postprocess_exe = executable('test_render3d_postprocess',
+      'test_render3d_postprocess.cpp',
+      dependencies : [nisaba_dep, extra_deps]
+    )
+    test('render3d_postprocess_test', test_render3d_postprocess_exe)
   endif
 endif
 

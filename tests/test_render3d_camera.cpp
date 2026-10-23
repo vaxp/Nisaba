@@ -1,11 +1,11 @@
-#include "nisaba/render3d/render3d.hpp"
+#include "orion/orion.hpp"
 #include <cassert>
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 
-using namespace nisaba::render3d;
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 
 static int g_tests_passed = 0;
 static int g_tests_total = 0;

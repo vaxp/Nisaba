@@ -4,12 +4,12 @@
 #include <vector>
 
 #include "nisaba/gpu/gpu_device.hpp"
-#include "nisaba/render3d/render3d.hpp"
+#include "orion/orion.hpp"
 #include <GL/glew.h>
 #include <GL/gl.h>
 
-using namespace nisaba::render3d;
-using namespace nisaba::physics;
+using namespace orion;
+using namespace orion::physics;
 using nisaba::gpu::GpuDevice;
 
 void test_gl_shader_program_compilation() {

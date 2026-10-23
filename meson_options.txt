@@ -3,7 +3,7 @@ option('enable_gpu', type : 'boolean', value : true, description : 'Enable hardw
 option('enable_layout', type : 'boolean', value : true, description : 'Enable sovereign nisaba-layout flexbox subsystem')
 option('build_tests', type : 'boolean', value : true, description : 'Build Nisaba automated unit tests')
 option('build_examples', type : 'boolean', value : true, description : 'Build showcase and demo examples')
-option('build_benchmarks', type : 'boolean', value : false, description : 'Build offline comparative benchmarks against external engines')
+option('build_benchmarks', type : 'boolean', value : true, description : 'Build offline comparative benchmarks against external engines')
 option('enable_backend_os', type : 'boolean', value : true, description : 'Enable optional sovereign native OS windowing backend (Wayland, X11, Win32, etc.)')
 option('enable_animation', type : 'boolean', value : true, description : 'Enable sovereign nisaba-animation subsystem')
 option('enable_vulkan', type : 'boolean', value : true, description : 'Enable sovereign Vulkan GPU rendering backend')
@@ -11,6 +11,5 @@ option('enable_lottie', type : 'boolean', value : true, description : 'Enable so
 option('enable_markdown', type : 'boolean', value : true, description : 'Enable sovereign nisaba-markdown document engine')
 option('enable_pdf', type : 'boolean', value : true, description : 'Enable sovereign nisaba-pdf document engine')
 option('enable_compositor', type : 'boolean', value : true, description : 'Enable native Wayland compositor pipeline and DRM/GBM/DMA-BUF hardware support')
-option('enable_physics', type : 'boolean', value : true, description : 'Enable sovereign 3D physics and rigid body simulation pipeline')
-option('enable_render3d', type : 'boolean', value : true, description : 'Enable sovereign 3D PBR rendering and graphics pipeline')
+option('enable_orion', type : 'boolean', value : true, description : 'Enable sovereign Orion 3D PBR rendering and physics engine')
 
