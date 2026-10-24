@@ -101,6 +101,17 @@ public:
     float transmission{0.0f};
     float ior{1.5f};
     Vec3 absorption{1.0f, 1.0f, 1.0f};
+    float dispersion{0.0f};
+    bool thin_walled{false};
+
+    // Thin-Film Iridescence parameters (KHR_materials_iridescence)
+    float iridescence{0.0f};
+    float iridescence_ior{1.3f};
+    float iridescence_thickness{300.0f}; // Nanometers [100..800]
+
+    // Specular Anti-Aliasing (Kaplanyan / Toksvig) parameters
+    float specular_aa_variance{0.15f};
+    float specular_aa_threshold{0.2f};
 
     std::shared_ptr<Texture2D> base_color_texture;
     std::shared_ptr<Texture2D> metallic_roughness_texture;
@@ -229,6 +240,23 @@ public:
         m->shading_model = ShadingModel::Unlit;
         m->base_color_factor = color;
         m->emissive_factor = emissive;
+        return m;
+    }
+
+    /// @brief Creates a thin-film iridescent material (soap bubble, Dichroic glass, beetle shell).
+    [[nodiscard]] static std::shared_ptr<PbrMaterial> create_iridescent(
+        const Vec4& base_color = Vec4(0.15f, 0.15f, 0.2f, 1.0f),
+        float iridescence_factor = 1.0f,
+        float thickness_nm = 380.0f,
+        float roughness = 0.12f
+    ) {
+        auto m = std::make_shared<PbrMaterial>();
+        m->shading_model = ShadingModel::Standard;
+        m->base_color_factor = base_color;
+        m->metallic_factor = 0.85f;
+        m->roughness_factor = roughness;
+        m->iridescence = iridescence_factor;
+        m->iridescence_thickness = thickness_nm;
         return m;
     }
 };

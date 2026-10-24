@@ -11,7 +11,10 @@ namespace orion {
 enum class ToneMapping : uint8_t {
     None = 0,
     Reinhard = 1,
-    ACES = 2
+    ACES = 2,
+    AgX = 3,
+    AgXPunchy = 4,
+    PbrNeutral = 5
 };
 
 struct Viewport3D {

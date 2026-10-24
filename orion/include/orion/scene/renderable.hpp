@@ -4,6 +4,7 @@
 #include "orion/math/aabb.hpp"
 #include "orion/geometry/mesh.hpp"
 #include "orion/material/pbr_material.hpp"
+#include "orion/animation/skeleton.hpp"
 #include <memory>
 #include <vector>
 
@@ -17,6 +18,7 @@ public:
     uint32_t id{0};
     std::shared_ptr<Mesh3D> mesh;
     std::vector<std::shared_ptr<PbrMaterial>> materials;
+    std::shared_ptr<Skeleton> skeleton;
     Mat44 transform{Mat44::identity()};
 
     bool visible{true};

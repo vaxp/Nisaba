@@ -1,4 +1,5 @@
 #include "orion/ibl/spherical_harmonics.hpp"
+#include "orion/math/simd_math.hpp"
 #include <algorithm>
 
 namespace orion {
@@ -14,32 +15,51 @@ Vec3 SphericalHarmonics9::evaluate(const Vec3& normal) const noexcept {
     constexpr float c3 = 0.743125f;
     constexpr float c4 = 0.886227f;
     constexpr float c5 = 0.247708f;
+    constexpr float two_c1 = 2.0f * c1;
+    constexpr float two_c2 = 2.0f * c2;
 
-    // 0: L00
-    // 1: L1-1 (y), 2: L10 (z), 3: L11 (x)
-    // 4: L2-2 (xy), 5: L2-1 (yz), 6: L20 (3z^2-1), 7: L21 (xz), 8: L22 (x^2-y^2)
-    const Vec3 l00 = coefficients[0];
-    const Vec3 l1_1 = coefficients[1];
-    const Vec3 l10 = coefficients[2];
-    const Vec3 l11 = coefficients[3];
-    const Vec3 l2_2 = coefficients[4];
-    const Vec3 l2_1 = coefficients[5];
-    const Vec3 l20 = coefficients[6];
-    const Vec3 l21 = coefficients[7];
-    const Vec3 l22 = coefficients[8];
+    const float w0 = c4;
+    const float w1 = two_c2 * y;
+    const float w2 = two_c2 * z;
+    const float w3 = two_c2 * x;
+    const float w4 = two_c1 * (x * y);
+    const float w5 = two_c1 * (y * z);
+    const float w6 = c3 * z * z - c5;
+    const float w7 = two_c1 * (x * z);
+    const float w8 = c1 * (x * x - y * y);
 
+#if defined(NISABA_PHYSICS_SIMD_SSE)
+    __m128 acc = _mm_mul_ps(_mm_load_ps(&coefficients[0].x), _mm_set1_ps(w0));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[1].x), _mm_set1_ps(w1)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[2].x), _mm_set1_ps(w2)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[3].x), _mm_set1_ps(w3)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[4].x), _mm_set1_ps(w4)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[5].x), _mm_set1_ps(w5)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[6].x), _mm_set1_ps(w6)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[7].x), _mm_set1_ps(w7)));
+    acc = _mm_add_ps(acc, _mm_mul_ps(_mm_load_ps(&coefficients[8].x), _mm_set1_ps(w8)));
+    acc = _mm_max_ps(acc, _mm_setzero_ps());
+    alignas(16) float out[4];
+    _mm_store_ps(out, acc);
+    return Vec3(out[0], out[1], out[2]);
+#else
     Vec3 irradiance =
-        l22 * (c1 * (x * x - y * y)) +
-        l20 * (c3 * z * z - c5) +
-        l00 * c4 +
-        (l2_2 * (x * y) + l21 * (x * z) + l2_1 * (y * z)) * (2.0f * c1) +
-        (l11 * x + l1_1 * y + l10 * z) * (2.0f * c2);
+        coefficients[0] * w0 +
+        coefficients[1] * w1 +
+        coefficients[2] * w2 +
+        coefficients[3] * w3 +
+        coefficients[4] * w4 +
+        coefficients[5] * w5 +
+        coefficients[6] * w6 +
+        coefficients[7] * w7 +
+        coefficients[8] * w8;
 
     return Vec3(
         std::max(0.0f, irradiance.x),
         std::max(0.0f, irradiance.y),
         std::max(0.0f, irradiance.z)
     );
+#endif
 }
 
 void SphericalHarmonics9::scale(float factor) noexcept {

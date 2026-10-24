@@ -94,6 +94,24 @@ public:
         float sss_power = 12.0f
     ) noexcept;
 
+    /// E_comp = 1.0 + f0 * (1.0 / dfg_y - 1.0).
+    [[nodiscard]] static Vec3 evaluate_energy_compensation(
+        const Vec3& f0,
+        float dfg_y
+    ) noexcept;
+
+    /// @brief Analytical polynomial approximation of split-sum DFG.y for multiple-scattering energy conservation.
+    [[nodiscard]] static float approximate_dfg_multiscatter(
+        float n_dot_v,
+        float perceptual_roughness
+    ) noexcept;
+
+    [[nodiscard]] static Vec3 evaluate_iridescence(
+        float cos_theta,
+        float thickness_nm = 380.0f,
+        float film_ior = 1.3f
+    ) noexcept;
+
     // --- Embedded Sovereign GLSL 450 Shaders ---
     static constexpr const char* PBR_VERTEX_SHADER_GLSL = R"(#version 450
 layout(location = 0) in vec3 inPosition;

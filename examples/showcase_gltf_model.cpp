@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     std::cout << "==========================================================" << std::endl;
 
     // 1. Resolve 3D Model File Path
-    std::string model_path = "third_party/filament-main/third_party/models/DamagedHelmet/DamagedHelmet.glb";
+    std::string model_path = "third_party/models/Lantern/Lantern.glb";
     if (argc > 1 && argv[1] != nullptr && std::strlen(argv[1]) > 0) {
         model_path = argv[1];
     }
@@ -28,10 +28,8 @@ int main(int argc, char** argv) {
     if (!std::filesystem::exists(model_path)) {
         // Try fallback search
         const std::vector<std::string> fallbacks = {
-            "third_party/filament-main/third_party/models/Fox/Fox.glb",
-            "third_party/filament-main/third_party/models/shader_ball/shader_ball.gltf",
-            "third_party/filament-main/third_party/models/FlightHelmet/FlightHelmet.gltf",
-            "third_party/filament-main/third_party/models/lucy/lucy.glb"
+            "third_party/models/Sponza/sponza.glb",
+            "third_party/models/nativeStaticScene.glb"
         };
         for (const auto& fb : fallbacks) {
             if (std::filesystem::exists(fb)) {

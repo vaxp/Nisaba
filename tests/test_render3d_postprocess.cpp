@@ -133,6 +133,20 @@ void test_aces_filmic_tonemapping() {
         prev = y;
     }
     TEST_ASSERT(strictly_monotonic, "ACES tonemapping curve is monotonically increasing");
+
+    Vec3 hdr_sample(2.5f, 1.2f, 0.4f);
+    Vec3 agx = PostProcessPipeline::evaluate_tone_mapping(hdr_sample, ToneMappingOperator::AgX);
+    Vec3 agx_punchy = PostProcessPipeline::evaluate_tone_mapping(hdr_sample, ToneMappingOperator::AgXPunchy);
+    Vec3 pbr_neutral = PostProcessPipeline::evaluate_tone_mapping(hdr_sample, ToneMappingOperator::PbrNeutral);
+
+    TEST_ASSERT(agx.x > 0.5f && agx.x <= 1.0f, "AgX maps HDR highlight into [0.5, 1.0]");
+    TEST_ASSERT(agx_punchy.x > 0.5f && agx_punchy.x <= 1.0f, "AgX Punchy maps HDR highlight into [0.5, 1.0]");
+    TEST_ASSERT(pbr_neutral.x > 0.7f && pbr_neutral.x <= 1.0f, "Khronos PBR Neutral compresses HDR shoulder into [0.7, 1.0]");
+
+    // Khronos PBR Neutral must be strictly linear in midtones (< 0.76)
+    Vec3 midtone(0.5f, 0.3f, 0.2f);
+    Vec3 pbr_mid = PostProcessPipeline::evaluate_tone_mapping(midtone, ToneMappingOperator::PbrNeutral);
+    TEST_ASSERT(std::abs(pbr_mid.x - (0.5f - 0.04f)) < 1e-4f, "Khronos PBR Neutral preserves exact linear midtone slope");
 }
 
 void test_tent_upsample_weights() {

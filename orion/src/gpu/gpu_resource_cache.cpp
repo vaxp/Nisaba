@@ -38,6 +38,20 @@ void GpuResourceCache::init_ubos() {
         glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_material_ubo);
     }
 
+    if (m_skinning_ubo == 0) {
+        glGenBuffers(1, &m_skinning_ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, m_skinning_ubo);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(GpuSkinningUboBlock), nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 3, m_skinning_ubo);
+    }
+
+    if (m_instancing_ubo == 0) {
+        glGenBuffers(1, &m_instancing_ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, m_instancing_ubo);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(GpuInstancingUboBlock), nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 4, m_instancing_ubo);
+    }
+
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -72,6 +86,7 @@ void GpuResourceCache::init_default_textures() {
 void GpuResourceCache::clear() noexcept {
     for (auto& [mesh_ptr, handle] : m_mesh_cache) {
         if (handle.vbo) glDeleteBuffers(1, &handle.vbo);
+        if (handle.skin_vbo) glDeleteBuffers(1, &handle.skin_vbo);
         if (handle.ebo) glDeleteBuffers(1, &handle.ebo);
         if (handle.vao) glDeleteVertexArrays(1, &handle.vao);
     }
@@ -96,6 +111,14 @@ void GpuResourceCache::clear() noexcept {
         glDeleteBuffers(1, &m_material_ubo);
         m_material_ubo = 0;
     }
+    if (m_skinning_ubo) {
+        glDeleteBuffers(1, &m_skinning_ubo);
+        m_skinning_ubo = 0;
+    }
+    if (m_instancing_ubo) {
+        glDeleteBuffers(1, &m_instancing_ubo);
+        m_instancing_ubo = 0;
+    }
     if (m_default_white_tex) {
         glDeleteTextures(1, &m_default_white_tex);
         m_default_white_tex = 0;
@@ -111,6 +134,14 @@ void GpuResourceCache::clear() noexcept {
     if (m_dfg_lut_tex) {
         glDeleteTextures(1, &m_dfg_lut_tex);
         m_dfg_lut_tex = 0;
+    }
+    if (m_cluster_cells_tex) {
+        glDeleteTextures(1, &m_cluster_cells_tex);
+        m_cluster_cells_tex = 0;
+    }
+    if (m_cluster_indices_tex) {
+        glDeleteTextures(1, &m_cluster_indices_tex);
+        m_cluster_indices_tex = 0;
     }
     for (auto& pair : m_cubemap_cache) {
         if (pair.second) {
@@ -197,6 +228,33 @@ GpuMeshHandle GpuResourceCache::get_or_upload_mesh(const Mesh3D& mesh) {
         sizeof(Vertex3D),
         reinterpret_cast<const void*>(offsetof(Vertex3D, uv1))
     );
+
+    // Optional Skeletal Skinning attributes (5: BoneIndices, 6: BoneWeights)
+    if (!mesh.skin_data.empty() && mesh.skin_data.size() >= mesh.vertices.size()) {
+        glGenBuffers(1, &handle.skin_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, handle.skin_vbo);
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(mesh.skin_data.size() * sizeof(VertexSkinData)),
+            mesh.skin_data.data(),
+            GL_STATIC_DRAW
+        );
+
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(
+            5, 4, GL_UNSIGNED_SHORT, GL_FALSE,
+            sizeof(VertexSkinData),
+            reinterpret_cast<const void*>(offsetof(VertexSkinData, joints))
+        );
+
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(
+            6, 4, GL_FLOAT, GL_FALSE,
+            sizeof(VertexSkinData),
+            reinterpret_cast<const void*>(offsetof(VertexSkinData, weights))
+        );
+        handle.has_skinning = true;
+    }
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -330,6 +388,108 @@ void GpuResourceCache::update_material_ubo(const PbrMaterialUniforms& material_u
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(PbrMaterialUniforms), &material_uniforms);
     glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_material_ubo);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+void GpuResourceCache::update_skinning_ubo(const Skeleton& skeleton) {
+    if (m_skinning_ubo == 0) {
+        init_ubos();
+    }
+
+    GpuSkinningUboBlock block{};
+    const size_t count = std::min(skeleton.joint_matrices.size(), GpuSkinningUboBlock::MAX_BONES);
+    for (size_t i = 0; i < count; ++i) {
+        const Mat44& in = skeleton.joint_matrices[i];
+        float* out = &block.bone_matrices[i * 16];
+        for (int c = 0; c < 4; ++c) {
+            for (int r = 0; r < 4; ++r) {
+                out[c * 4 + r] = in.m[r * 4 + c];
+            }
+        }
+    }
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_skinning_ubo);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr>(count * 16 * sizeof(float)), block.bone_matrices);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, m_skinning_ubo);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+void GpuResourceCache::update_instancing_ubo(const GpuInstanceTransform* instances, size_t instance_count) {
+    if (m_instancing_ubo == 0) {
+        init_ubos();
+    }
+    const size_t count = std::min(instance_count, GpuInstancingUboBlock::MAX_INSTANCES);
+    if (count == 0 || !instances) return;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_instancing_ubo);
+    glBufferSubData(
+        GL_UNIFORM_BUFFER, 0,
+        static_cast<GLsizeiptr>(count * sizeof(GpuInstanceTransform)),
+        instances
+    );
+    glBindBufferBase(GL_UNIFORM_BUFFER, 4, m_instancing_ubo);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+void GpuResourceCache::update_cluster_textures(const ClusterGrid& grid) {
+    const uint32_t w = grid.dim_x() * grid.dim_y(); // 144
+    const uint32_t h = grid.dim_z();                // 24
+    const size_t total_cells = static_cast<size_t>(w) * h;
+
+    if (m_cluster_cells_tex == 0) {
+        glGenTextures(1, &m_cluster_cells_tex);
+        glBindTexture(GL_TEXTURE_2D, m_cluster_cells_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, static_cast<GLsizei>(w), static_cast<GLsizei>(h), 0, GL_RG, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+
+    constexpr uint32_t IDX_W = 1024;
+    constexpr uint32_t IDX_H = 64;
+    constexpr size_t MAX_INDICES = IDX_W * IDX_H;
+
+    if (m_cluster_indices_tex == 0) {
+        glGenTextures(1, &m_cluster_indices_tex);
+        glBindTexture(GL_TEXTURE_2D, m_cluster_indices_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, IDX_W, IDX_H, 0, GL_RED, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+
+    m_cluster_cells_scratch.resize(total_cells * 2);
+    const auto cells = grid.cells();
+    for (size_t i = 0; i < total_cells && i < cells.size(); ++i) {
+        m_cluster_cells_scratch[i * 2 + 0] = static_cast<float>(cells[i].offset);
+        m_cluster_cells_scratch[i * 2 + 1] = static_cast<float>(cells[i].count);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, m_cluster_cells_tex);
+    glTexSubImage2D(
+        GL_TEXTURE_2D, 0, 0, 0,
+        static_cast<GLsizei>(w), static_cast<GLsizei>(h),
+        GL_RG, GL_FLOAT, m_cluster_cells_scratch.data()
+    );
+
+    const auto indices = grid.light_indices();
+    const size_t idx_count = std::min(indices.size(), MAX_INDICES);
+    if (idx_count > 0) {
+        const uint32_t rows = static_cast<uint32_t>((idx_count + IDX_W - 1) / IDX_W);
+        m_cluster_indices_scratch.resize(static_cast<size_t>(rows) * IDX_W, 0.0f);
+        for (size_t i = 0; i < idx_count; ++i) {
+            m_cluster_indices_scratch[i] = static_cast<float>(indices[i]);
+        }
+        glBindTexture(GL_TEXTURE_2D, m_cluster_indices_tex);
+        glTexSubImage2D(
+            GL_TEXTURE_2D, 0, 0, 0,
+            IDX_W, static_cast<GLsizei>(rows),
+            GL_RED, GL_FLOAT, m_cluster_indices_scratch.data()
+        );
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 uint32_t GpuResourceCache::get_or_create_dfg_lut() {

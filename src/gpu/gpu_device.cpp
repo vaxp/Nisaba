@@ -69,7 +69,7 @@ GpuDevice::~GpuDevice() {
 
 void GpuDevice::make_current() {
 #if defined(NISABA_HAS_EGL)
-    if (egl_display_ && egl_context_ && egl_surface_) {
+    if (egl_display_ && egl_context_) {
         static void* lib_egl = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
         if (lib_egl) {
             using PFN_eglMakeCurrent = EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
@@ -180,9 +180,19 @@ std::shared_ptr<GpuDevice> GpuDevice::create_headless(uint32_t width, uint32_t h
                         0x3038
                     };
 
-                    EGLConfig config;
+                    EGLConfig config = nullptr;
                     EGLint num_configs = 0;
-                    if (eglChooseConfig_fn(dpy, config_attribs, &config, 1, &num_configs) && num_configs > 0) {
+                    bool has_pbuffer_cfg = eglChooseConfig_fn(dpy, config_attribs, &config, 1, &num_configs) && num_configs > 0;
+                    if (!has_pbuffer_cfg) {
+                        const EGLint surfaceless_attribs[] = {
+                            0x3040, 0x0008 /* EGL_OPENGL_BIT */,
+                            0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8,
+                            0x3026, 8,
+                            0x3038
+                        };
+                        eglChooseConfig_fn(dpy, surfaceless_attribs, &config, 1, &num_configs);
+                    }
+                    if (num_configs > 0) {
                         const EGLint ctx_attribs[] = {
                             0x3098, 3, // EGL_CONTEXT_MAJOR_VERSION = 3
                             0x3038
@@ -190,13 +200,16 @@ std::shared_ptr<GpuDevice> GpuDevice::create_headless(uint32_t width, uint32_t h
 
                         EGLContext ctx = eglCreateContext_fn(dpy, config, (EGLContext)0, ctx_attribs);
                         if (ctx != (EGLContext)0) {
-                            const EGLint pbuf_attribs[] = {
-                                0x3057, static_cast<EGLint>(width),
-                                0x3056, static_cast<EGLint>(height),
-                                0x3038
-                            };
-                            EGLSurface pbuf = eglCreatePbufferSurface_fn(dpy, config, pbuf_attribs);
-                            if (pbuf != (EGLSurface)0 && eglMakeCurrent_fn(dpy, pbuf, pbuf, ctx)) {
+                            EGLSurface pbuf = (EGLSurface)0;
+                            if (has_pbuffer_cfg) {
+                                const EGLint pbuf_attribs[] = {
+                                    0x3057, static_cast<EGLint>(width),
+                                    0x3056, static_cast<EGLint>(height),
+                                    0x3038
+                                };
+                                pbuf = eglCreatePbufferSurface_fn(dpy, config, pbuf_attribs);
+                            }
+                            if (eglMakeCurrent_fn(dpy, pbuf, pbuf, ctx)) {
                                 dev->egl_display_ = dpy;
                                 dev->egl_context_ = ctx;
                                 dev->egl_surface_ = pbuf;

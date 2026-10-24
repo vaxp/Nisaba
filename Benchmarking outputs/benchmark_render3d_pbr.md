@@ -6,13 +6,13 @@ Comprehensive micro-profiling of analytical shader lobes, clustered lighting, IB
 
 | Benchmark Metric | Mean Latency (ms) | Min (ms) | Max (ms) | Throughput (Million Ops/sec) |
 |:---|:---:|:---:|:---:|:---:|
-| **BRDF: Standard Metallic-Roughness Cook-Torrance** | `50.9256 ms` | `49.5297 ms` | `52.5296 ms` | **19.64 Mops/s** |
-| **BRDF: ClearCoat Dual-Lobe GGX** | `39.7215 ms` | `37.4455 ms` | `41.4579 ms` | **25.18 Mops/s** |
-| **BRDF: Charlie Cloth Sheen** | `38.1081 ms` | `37.6172 ms` | `39.2289 ms` | **26.24 Mops/s** |
-| **Lighting: 3D Frustum Cluster Grid Assignment (128 Lights)** | `374.7250 ms` | `369.3579 ms` | `393.5214 ms` | **0.00 Mops/s** |
-| **IBL: 9-Band Spherical Harmonics Irradiance** | `13.6274 ms` | `13.3301 ms` | `14.0046 ms` | **146.76 Mops/s** |
-| **PostProcess: ACES Filmic Curve Tonemapping** | `11.9122 ms` | `11.4669 ms` | `12.5791 ms` | **419.74 Mops/s** |
-| **Hardware GPU: 1080p Full Pass (PBR + Shadows + GTAO + Bloom + Tonemap)** | `4.9831 ms` | `4.5596 ms` | `6.2194 ms` | **0.02 Mops/s** |
+| **BRDF: Standard Metallic-Roughness Cook-Torrance** | `18.6372 ms` | `18.1075 ms` | `19.5632 ms` | **53.66 Mops/s** |
+| **BRDF: ClearCoat Dual-Lobe GGX** | `15.6110 ms` | `15.1096 ms` | `16.1265 ms` | **64.06 Mops/s** |
+| **BRDF: Charlie Cloth Sheen** | `34.7159 ms` | `33.8827 ms` | `35.8515 ms` | **28.81 Mops/s** |
+| **Lighting: 3D Frustum Cluster Grid Assignment (128 Lights)** | `136.2628 ms` | `129.5525 ms` | `144.3300 ms` | **0.01 Mops/s** |
+| **IBL: 9-Band Spherical Harmonics Irradiance** | `12.1909 ms` | `12.0296 ms` | `12.5444 ms` | **164.06 Mops/s** |
+| **PostProcess: ACES Filmic Curve Tonemapping** | `12.2118 ms` | `11.8747 ms` | `12.7400 ms` | **409.44 Mops/s** |
+| **Hardware GPU: 1080p Full Pass (PBR + Shadows + GTAO + Bloom + Tonemap)** | `5.5524 ms` | `5.3733 ms` | `5.8310 ms` | **0.02 Mops/s** |
 
 ## Architecture Highlights
 

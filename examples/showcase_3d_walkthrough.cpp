@@ -153,9 +153,7 @@ int main(int argc, char** argv) {
         const std::vector<std::string> fallbacks = {
             "third_party/models/Sponza/sponza.glb",
             "third_party/models/Lantern/Lantern.glb",
-            "third_party/filament-main/third_party/models/DamagedHelmet/DamagedHelmet.glb",
-            "third_party/filament-main/third_party/models/Fox/Fox.glb",
-            "third_party/filament-main/third_party/models/lucy/lucy.glb"
+            "third_party/models/nativeStaticScene.glb"
         };
         for (const auto& fb : fallbacks) {
             if (std::filesystem::exists(fb)) {

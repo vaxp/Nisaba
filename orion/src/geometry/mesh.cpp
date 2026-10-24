@@ -155,4 +155,39 @@ void Mesh3D::upload_to_buffers() noexcept {
     index_buffer.set_indices(indices);
 }
 
+void Mesh3D::apply_morph_targets(const Mesh3D& base_mesh, const std::vector<float>& weights) noexcept {
+    if (base_mesh.vertices.empty() || base_mesh.morph_targets.empty()) return;
+    const size_t v_count = base_mesh.vertices.size();
+    if (vertices.size() != v_count) {
+        vertices = base_mesh.vertices;
+    } else {
+        for (size_t i = 0; i < v_count; ++i) {
+            vertices[i].position = base_mesh.vertices[i].position;
+            vertices[i].normal = base_mesh.vertices[i].normal;
+        }
+    }
+
+    const size_t t_count = std::min(base_mesh.morph_targets.size(), weights.size());
+    for (size_t t = 0; t < t_count; ++t) {
+        const float w = weights[t];
+        if (std::abs(w) <= 1e-6f) continue;
+
+        const auto& target = base_mesh.morph_targets[t];
+        const size_t pos_count = std::min(v_count, target.position_deltas.size());
+        for (size_t i = 0; i < pos_count; ++i) {
+            vertices[i].position = vertices[i].position + target.position_deltas[i] * w;
+        }
+        const size_t norm_count = std::min(v_count, target.normal_deltas.size());
+        for (size_t i = 0; i < norm_count; ++i) {
+            vertices[i].normal = vertices[i].normal + target.normal_deltas[i] * w;
+        }
+    }
+
+    for (size_t i = 0; i < v_count; ++i) {
+        if (vertices[i].normal.length_sq() > 1e-12f) {
+            vertices[i].normal = vertices[i].normal.normalized();
+        }
+    }
+}
+
 } // namespace orion

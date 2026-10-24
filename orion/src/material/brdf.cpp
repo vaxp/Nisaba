@@ -6,6 +6,11 @@ namespace orion {
 
 namespace {
 constexpr float INV_PI = 1.0f / PI;
+
+[[nodiscard]] inline constexpr float pow5_fast(float x) noexcept {
+    const float x2 = x * x;
+    return x2 * x2 * x;
+}
 } // namespace
 
 float CookTorranceBRDF::distribution_ggx(float n_dot_h, float roughness) noexcept {
@@ -18,14 +23,15 @@ float CookTorranceBRDF::distribution_ggx(float n_dot_h, float roughness) noexcep
 
 float CookTorranceBRDF::geometry_smith(float n_dot_v, float n_dot_l, float roughness) noexcept {
     const float r = roughness + 1.0f;
-    const float k = (r * r) / 8.0f;
-    const float g1_v = n_dot_v / (n_dot_v * (1.0f - k) + k);
-    const float g1_l = n_dot_l / (n_dot_l * (1.0f - k) + k);
+    const float k = (r * r) * 0.125f;
+    const float one_minus_k = 1.0f - k;
+    const float g1_v = n_dot_v / (n_dot_v * one_minus_k + k);
+    const float g1_l = n_dot_l / (n_dot_l * one_minus_k + k);
     return g1_v * g1_l;
 }
 
 Vec3 CookTorranceBRDF::fresnel_schlick(float cos_theta, const Vec3& f0) noexcept {
-    const float factor = std::pow(std::clamp(1.0f - cos_theta, 0.0f, 1.0f), 5.0f);
+    const float factor = pow5_fast(std::clamp(1.0f - cos_theta, 0.0f, 1.0f));
     return f0 + (Vec3(1.0f, 1.0f, 1.0f) - f0) * factor;
 }
 
@@ -37,34 +43,54 @@ Vec3 CookTorranceBRDF::evaluate(
     float metallic,
     float roughness
 ) noexcept {
-    const float n_dot_l = std::max(n.dot(l), 0.0f);
+    const float n_dot_l = n.x * l.x + n.y * l.y + n.z * l.z;
     if (n_dot_l <= 0.0f) {
         return Vec3(0.0f, 0.0f, 0.0f);
     }
 
-    const float n_dot_v = std::max(n.dot(v), 1e-4f);
-    const Vec3 h = (v + l).normalized();
-    const float n_dot_h = std::max(n.dot(h), 0.0f);
-    const float v_dot_h = std::max(v.dot(h), 0.0f);
+    const float raw_n_dot_v = n.x * v.x + n.y * v.y + n.z * v.z;
+    const float n_dot_v = (raw_n_dot_v > 1e-4f) ? raw_n_dot_v : 1e-4f;
+
+    const float hx = v.x + l.x;
+    const float hy = v.y + l.y;
+    const float hz = v.z + l.z;
+    const float h_len_sq = hx * hx + hy * hy + hz * hz;
+    const float inv_h_len = (h_len_sq > 1e-12f) ? (1.0f / std::sqrt(h_len_sq)) : 0.0f;
+
+    const float n_dot_h = std::max((n.x * hx + n.y * hy + n.z * hz) * inv_h_len, 0.0f);
+    const float v_dot_h = std::max((v.x * hx + v.y * hy + v.z * hz) * inv_h_len, 0.0f);
 
     roughness = std::clamp(roughness, 0.04f, 1.0f);
     metallic = std::clamp(metallic, 0.0f, 1.0f);
 
-    const Vec3 f0 = Vec3(0.04f, 0.04f, 0.04f) * (1.0f - metallic) + albedo * metallic;
+    const float one_minus_m = 1.0f - metallic;
+    const float f0_x = 0.04f * one_minus_m + albedo.x * metallic;
+    const float f0_y = 0.04f * one_minus_m + albedo.y * metallic;
+    const float f0_z = 0.04f * one_minus_m + albedo.z * metallic;
 
-    const float ndf = distribution_ggx(n_dot_h, roughness);
-    const float g = geometry_smith(n_dot_v, n_dot_l, roughness);
-    const Vec3 f = fresnel_schlick(v_dot_h, f0);
+    const float a = roughness * roughness;
+    const float a2 = a * a;
+    const float denom_ndf = (n_dot_h * n_dot_h * (a2 - 1.0f) + 1.0f);
+    const float ndf = a2 / (PI * denom_ndf * denom_ndf + 1e-7f);
 
-    const Vec3 numerator = f * (ndf * g);
-    const float denominator = 4.0f * n_dot_v * n_dot_l + 1e-4f;
-    const Vec3 specular = numerator / denominator;
+    const float r = roughness + 1.0f;
+    const float k = (r * r) * 0.125f;
+    const float one_minus_k = 1.0f - k;
+    const float g = (n_dot_v / (n_dot_v * one_minus_k + k)) * (n_dot_l / (n_dot_l * one_minus_k + k));
 
-    const Vec3 k_s = f;
-    const Vec3 k_d = (Vec3(1.0f, 1.0f, 1.0f) - k_s) * (1.0f - metallic);
-    const Vec3 diffuse = k_d * albedo * INV_PI;
+    const float f_factor = pow5_fast(std::clamp(1.0f - v_dot_h, 0.0f, 1.0f));
+    const float fx = f0_x + (1.0f - f0_x) * f_factor;
+    const float fy = f0_y + (1.0f - f0_y) * f_factor;
+    const float fz = f0_z + (1.0f - f0_z) * f_factor;
 
-    return (diffuse + specular) * n_dot_l;
+    const float spec_scale = (ndf * g) / (4.0f * n_dot_v * n_dot_l + 1e-4f);
+    const float diff_scale = one_minus_m * INV_PI;
+
+    return Vec3(
+        ((1.0f - fx) * diff_scale * albedo.x + fx * spec_scale) * n_dot_l,
+        ((1.0f - fy) * diff_scale * albedo.y + fy * spec_scale) * n_dot_l,
+        ((1.0f - fz) * diff_scale * albedo.z + fz * spec_scale) * n_dot_l
+    );
 }
 
 float CookTorranceBRDF::distribution_charlie(float n_dot_h, float roughness) noexcept {
@@ -107,38 +133,53 @@ float CookTorranceBRDF::diffuse_wrap(float n_dot_l, float w) noexcept {
 Vec3 CookTorranceBRDF::evaluate_clear_coat(
     const Vec3& n, const Vec3& v, const Vec3& l, float coat_factor, float coat_roughness
 ) noexcept {
-    const float n_dot_l = std::max(n.dot(l), 0.0f);
+    const float n_dot_l = n.x * l.x + n.y * l.y + n.z * l.z;
     if (n_dot_l <= 0.0f || coat_factor <= 1e-4f) return Vec3(0.0f, 0.0f, 0.0f);
 
-    const Vec3 h = (v + l).normalized();
-    const float n_dot_h = std::max(n.dot(h), 0.0f);
-    const float l_dot_h = std::max(l.dot(h), 0.0f);
+    const float hx = v.x + l.x;
+    const float hy = v.y + l.y;
+    const float hz = v.z + l.z;
+    const float h_len_sq = hx * hx + hy * hy + hz * hz;
+    const float inv_h_len = (h_len_sq > 1e-12f) ? (1.0f / std::sqrt(h_len_sq)) : 0.0f;
+
+    const float n_dot_h = std::max((n.x * hx + n.y * hy + n.z * hz) * inv_h_len, 0.0f);
+    const float l_dot_h = std::max((l.x * hx + l.y * hy + l.z * hz) * inv_h_len, 0.0f);
 
     const float d = distribution_ggx(n_dot_h, coat_roughness);
     const float vis = visibility_kelemen(l_dot_h);
-    const float f = 0.04f + 0.96f * std::pow(1.0f - l_dot_h, 5.0f);
+    const float f = 0.04f + 0.96f * pow5_fast(1.0f - l_dot_h);
+    const float val = d * vis * f * coat_factor * n_dot_l;
 
-    return Vec3(1.0f, 1.0f, 1.0f) * (d * vis * f * coat_factor * n_dot_l);
+    return Vec3(val, val, val);
 }
 
 Vec3 CookTorranceBRDF::evaluate_cloth(
     const Vec3& n, const Vec3& v, const Vec3& l, const Vec3& base_color, const Vec3& sheen_color, float sheen_roughness
 ) noexcept {
-    const float n_dot_l = std::max(n.dot(l), 0.0f);
-    const float n_dot_v = std::max(n.dot(v), 1e-4f);
+    const float n_dot_l = n.x * l.x + n.y * l.y + n.z * l.z;
     if (n_dot_l <= 0.0f) return Vec3(0.0f, 0.0f, 0.0f);
+    const float raw_n_dot_v = n.x * v.x + n.y * v.y + n.z * v.z;
+    const float n_dot_v = (raw_n_dot_v > 1e-4f) ? raw_n_dot_v : 1e-4f;
 
-    const Vec3 h = (v + l).normalized();
-    const float n_dot_h = std::max(n.dot(h), 0.0f);
+    const float hx = v.x + l.x;
+    const float hy = v.y + l.y;
+    const float hz = v.z + l.z;
+    const float h_len_sq = hx * hx + hy * hy + hz * hz;
+    const float inv_h_len = (h_len_sq > 1e-12f) ? (1.0f / std::sqrt(h_len_sq)) : 0.0f;
+    const float n_dot_h = std::max((n.x * hx + n.y * hy + n.z * hz) * inv_h_len, 0.0f);
 
     const float d = distribution_charlie(n_dot_h, sheen_roughness);
-    const float vis = visibility_neubelt(n_dot_v, n_dot_l);
-    const Vec3 sheen_spec = sheen_color * (d * vis);
+    const float denom = 4.0f * (n_dot_l + n_dot_v - n_dot_l * n_dot_v);
+    const float vis = (denom > 1e-5f) ? (1.0f / denom) : 0.0f;
+    const float spec_factor = d * vis * n_dot_l;
 
-    const float wrap_diff = diffuse_wrap(n_dot_l, 0.5f);
-    const Vec3 diffuse = base_color * (wrap_diff * INV_PI);
+    const float wrap_diff = std::clamp((n_dot_l + 0.5f) * 0.44444445f, 0.0f, 1.0f) * INV_PI * n_dot_l;
 
-    return (diffuse + sheen_spec) * n_dot_l;
+    return Vec3(
+        base_color.x * wrap_diff + sheen_color.x * spec_factor,
+        base_color.y * wrap_diff + sheen_color.y * spec_factor,
+        base_color.z * wrap_diff + sheen_color.z * spec_factor
+    );
 }
 
 Vec3 CookTorranceBRDF::evaluate_anisotropic(
@@ -190,6 +231,60 @@ Vec3 CookTorranceBRDF::evaluate_subsurface(
     const Vec3 diffuse = base_color * (n_dot_l * INV_PI);
 
     return diffuse + scattered;
+}
+
+Vec3 CookTorranceBRDF::evaluate_energy_compensation(
+    const Vec3& f0,
+    float dfg_y
+) noexcept {
+    const float safe_dfg = std::max(dfg_y, 1e-4f);
+    const float factor = (1.0f / safe_dfg) - 1.0f;
+    return Vec3(
+        1.0f + f0.x * factor,
+        1.0f + f0.y * factor,
+        1.0f + f0.z * factor
+    );
+}
+
+float CookTorranceBRDF::approximate_dfg_multiscatter(
+    float n_dot_v,
+    float perceptual_roughness
+) noexcept {
+    const float r = std::clamp(perceptual_roughness, 0.04f, 1.0f);
+    const float nv = std::clamp(n_dot_v, 0.0f, 1.0f);
+    const float c0 = -1.0f * r + 1.0f;
+    const float a004 = std::min(r * r, std::exp2(-9.28f * nv)) * c0 + (1.0f - c0);
+    return std::clamp(-1.04f * a004 + 1.04f, 0.05f, 1.0f);
+}
+
+Vec3 CookTorranceBRDF::evaluate_iridescence(
+    float cos_theta,
+    float thickness_nm,
+    float film_ior
+) noexcept {
+    // Physical thin-film optical path difference (OPD) spectral interference
+    const float cos_t1 = std::clamp(cos_theta, 0.0f, 1.0f);
+    const float sin2_t1 = std::max(0.0f, 1.0f - cos_t1 * cos_t1);
+    const float sin2_t2 = sin2_t1 / std::max(film_ior * film_ior, 1.0f);
+    const float cos_t2 = std::sqrt(std::max(0.0f, 1.0f - sin2_t2));
+
+    // Optical path difference in nanometers (with half-wave phase shift)
+    const float opd = 2.0f * film_ior * thickness_nm * cos_t2;
+
+    // Evaluate interference across RGB primary wavelengths (650nm, 530nm, 460nm)
+    const float phase_r = TWO_PI * opd / 650.0f + PI;
+    const float phase_g = TWO_PI * opd / 530.0f + PI;
+    const float phase_b = TWO_PI * opd / 460.0f + PI;
+
+    const float r = 0.5f + 0.5f * std::cos(phase_r);
+    const float g = 0.5f + 0.5f * std::cos(phase_g);
+    const float b = 0.5f + 0.5f * std::cos(phase_b);
+
+    return Vec3(
+        std::clamp(r, 0.0f, 1.0f),
+        std::clamp(g, 0.0f, 1.0f),
+        std::clamp(b, 0.0f, 1.0f)
+    );
 }
 
 } // namespace orion

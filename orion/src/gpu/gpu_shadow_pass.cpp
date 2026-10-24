@@ -8,6 +8,10 @@ GpuShadowPass::GpuShadowPass(uint32_t resolution)
     : m_resolution(resolution) {
     init_framebuffer();
     m_depth_shader = GlShaderProgram::create_shadow_depth_shader();
+    if (m_depth_shader && m_depth_shader->is_valid()) {
+        m_loc_light_space = m_depth_shader->get_uniform_location("u_lightSpaceMatrix");
+        m_loc_model = m_depth_shader->get_uniform_location("u_model");
+    }
 }
 
 GpuShadowPass::~GpuShadowPass() {
@@ -76,7 +80,45 @@ void GpuShadowPass::begin(const Mat44& light_space_matrix) {
 
     if (m_depth_shader && m_depth_shader->is_valid()) {
         m_depth_shader->bind();
-        m_depth_shader->set_uniform("u_lightSpaceMatrix", m_light_space_matrix);
+        if (m_loc_light_space >= 0) {
+            glUniformMatrix4fv(m_loc_light_space, 1, GL_TRUE, m_light_space_matrix.m);
+        } else {
+            m_depth_shader->set_uniform("u_lightSpaceMatrix", m_light_space_matrix);
+        }
+    }
+}
+
+void GpuShadowPass::begin_atlas() {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glViewport(0, 0, static_cast<GLsizei>(m_resolution), static_cast<GLsizei>(m_resolution));
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(2.0f, 4.0f);
+
+    if (m_depth_shader && m_depth_shader->is_valid()) {
+        m_depth_shader->bind();
+    }
+}
+
+void GpuShadowPass::begin_cascade(uint32_t cascade_index, const Mat44& cascade_vp_matrix) {
+    m_light_space_matrix = cascade_vp_matrix;
+    const uint32_t half_res = m_resolution / 2;
+    const uint32_t qx = (cascade_index & 1u) * half_res;
+    const uint32_t qy = ((cascade_index >> 1u) & 1u) * half_res;
+    glViewport(static_cast<GLint>(qx), static_cast<GLint>(qy), static_cast<GLsizei>(half_res), static_cast<GLsizei>(half_res));
+
+    if (m_depth_shader && m_depth_shader->is_valid()) {
+        if (m_loc_light_space >= 0) {
+            glUniformMatrix4fv(m_loc_light_space, 1, GL_TRUE, m_light_space_matrix.m);
+        } else {
+            m_depth_shader->set_uniform("u_lightSpaceMatrix", m_light_space_matrix);
+        }
     }
 }
 
@@ -87,7 +129,11 @@ void GpuShadowPass::render_caster(
 ) {
     if (!m_depth_shader || !m_depth_shader->is_valid()) return;
 
-    m_depth_shader->set_uniform("u_model", world_transform);
+    if (m_loc_model >= 0) {
+        glUniformMatrix4fv(m_loc_model, 1, GL_TRUE, world_transform.m);
+    } else {
+        m_depth_shader->set_uniform("u_model", world_transform);
+    }
 
     auto handle = cache.get_or_upload_mesh(mesh);
     if (!handle.is_valid || handle.vao == 0) return;

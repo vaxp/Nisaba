@@ -48,14 +48,29 @@ public:
     [[nodiscard]] BloomPass& bloom_pass() noexcept { return m_bloom; }
     [[nodiscard]] GtaoPass& gtao_pass() noexcept { return m_gtao; }
 
+    /// @brief CPU-accessible tone mapping evaluation for unit testing and software verification.
+    [[nodiscard]] static Vec3 evaluate_tone_mapping(const Vec3& hdr_color, ToneMappingOperator op) noexcept;
+
 private:
     BloomPass m_bloom;
     GtaoPass m_gtao;
 
     uint32_t m_fullscreen_vao{0};
     std::unique_ptr<GlShaderProgram> m_composite_shader;
+    std::unique_ptr<GlShaderProgram> m_fxaa_taa_shader;
+
+    uint32_t m_ldr_fbo{0};
+    uint32_t m_ldr_tex{0};
+    uint32_t m_taa_history_fbo{0};
+    uint32_t m_taa_history_tex{0};
+    uint32_t m_aa_width{0};
+    uint32_t m_aa_height{0};
+    bool m_taa_history_valid{false};
+    Mat44 m_prev_view_proj{Mat44::identity()};
 
     void init_shaders();
+    void ensure_aa_buffers(uint32_t width, uint32_t height);
+    void cleanup_aa_buffers() noexcept;
     void render_quad() const noexcept;
 };
 

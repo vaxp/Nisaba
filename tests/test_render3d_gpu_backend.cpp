@@ -222,6 +222,23 @@ void test_full_hardware_pbr_rendering() {
               << " | Golden Cube: "
               << (int)center_r << "," << (int)center_g << "," << (int)center_b
               << ") PASSED!" << std::endl;
+
+    // [Test 6] Hardware Instancing, 4-Cascade CSM, and Clustered Forward (16 Lights)
+    std::cout << "[Test 6] Hardware Instancing (16 instances), 4-Cascade CSM & 16-Light Clustered GPU Pass..." << std::endl;
+    for (int i = 0; i < 15; ++i) {
+        auto inst = std::make_shared<Renderable3D>(cube_mesh, gold_mat);
+        inst->set_position(Vec3(static_cast<float>((i % 5) - 2) * 2.0f, 0.0f, -static_cast<float>(i / 5) * 2.5f));
+        scene->add_renderable(inst);
+    }
+    for (int l = 0; l < 12; ++l) {
+        scene->add_light(Light3D::create_point(Vec3(static_cast<float>(l - 6), 2.0f, 0.0f), 8.0f, Vec3(1.0f, 0.8f, 0.5f), 2.0f));
+    }
+    view.shadow_settings.cascade_count = 4;
+    surface.render_3d(backend, view, true);
+    assert(backend.last_stats().instanced_batches >= 1);
+    assert(glGetError() == GL_NO_ERROR);
+    std::cout << "  -> Instanced batches (" << backend.last_stats().instanced_batches
+              << "), 4-Cascade CSM & Clustered GPU Pass PASSED!" << std::endl;
 }
 
 int main() {

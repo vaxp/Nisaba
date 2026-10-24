@@ -38,7 +38,7 @@ PbrMaterialUniforms PbrMaterial::get_uniforms() const noexcept {
     u.clear_coat = clear_coat;
     u.clear_coat_roughness = clear_coat_roughness;
     u.anisotropy = anisotropy;
-    u.pad0 = 0.0f;
+    u.pad0 = iridescence;
 
     u.sheen_color[0] = sheen_color.x;
     u.sheen_color[1] = sheen_color.y;
@@ -53,12 +53,12 @@ PbrMaterialUniforms PbrMaterial::get_uniforms() const noexcept {
     u.subsurface_power = subsurface_power;
     u.transmission = transmission;
     u.ior = ior;
-    u.pad1 = 0.0f;
+    u.pad1 = iridescence_thickness;
 
     u.absorption[0] = absorption.x;
     u.absorption[1] = absorption.y;
     u.absorption[2] = absorption.z;
-    u.pad2 = 0.0f;
+    u.pad2 = thin_walled ? - std::max(0.001f, dispersion) : dispersion;
 
     return u;
 }

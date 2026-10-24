@@ -15,6 +15,7 @@ struct DrawCommand64 {
     uint32_t submesh_index{0};
     const PbrMaterial* material{nullptr};
     Mat44 world_transform;
+    Mat44 normal_matrix;
     float distance_to_camera{0.0f};
 
     [[nodiscard]] constexpr bool operator<(const DrawCommand64& rhs) const noexcept {
@@ -30,6 +31,7 @@ struct RenderStats {
     uint32_t total_draw_calls{0};
     uint32_t opaque_draw_calls{0};
     uint32_t transparent_draw_calls{0};
+    uint32_t instanced_batches{0};
     uint32_t total_triangles{0};
 
     void reset() noexcept {
@@ -39,6 +41,7 @@ struct RenderStats {
         total_draw_calls = 0;
         opaque_draw_calls = 0;
         transparent_draw_calls = 0;
+        instanced_batches = 0;
         total_triangles = 0;
     }
 };
@@ -48,6 +51,7 @@ struct RenderStats {
 class Renderer3D {
 public:
     std::vector<DrawCommand64> draw_queue;
+    std::vector<const Renderable3D*> m_visible_renderables;
     RenderStats last_stats;
     ShadowMap shadow_map;
 

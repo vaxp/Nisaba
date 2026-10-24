@@ -49,6 +49,8 @@ private:
     Mat44 m_view_projection{Mat44::identity()};
 
     std::unique_ptr<GlShaderProgram> m_depth_shader;
+    int m_loc_view_proj{-1};
+    int m_loc_model{-1};
 
     void ensure_capacity(uint32_t width, uint32_t height);
     void cleanup() noexcept;

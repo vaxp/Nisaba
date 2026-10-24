@@ -59,14 +59,15 @@ float ShadowMap::sample_shadow_pcf(const Vec3& world_pos, float bias) const noex
     return shadow * 0.25f;
 }
 
-Mat44 ShadowMap::compute_directional_shadow_matrix(
+Mat44 ShadowMap::compute_directional_slice_matrix(
     const Light3D& sun,
     const Camera3D& camera,
-    float shadow_distance,
+    float slice_near,
+    float slice_far,
     uint32_t shadow_resolution
 ) noexcept {
-    const float z_near = camera.get_near_clip();
-    const float z_far = std::min(camera.get_far_clip(), shadow_distance);
+    const float z_near = std::max(1e-3f, slice_near);
+    const float z_far = std::max(z_near + 0.1f, slice_far);
 
     const float fov_y = camera.get_fov_y();
     const float aspect = camera.get_aspect_ratio();
@@ -103,8 +104,9 @@ Mat44 ShadowMap::compute_directional_shadow_matrix(
 
     // Light View Matrix
     const Vec3 light_dir = sun.direction.normalized();
+    const Vec3 up = (std::abs(light_dir.y) > 0.99f) ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(0.0f, 1.0f, 0.0f);
     const Vec3 light_pos = centroid - light_dir * 100.0f;
-    const Mat44 light_view = Mat44::look_at(light_pos, centroid, Vec3(0.0f, 1.0f, 0.0f));
+    const Mat44 light_view = Mat44::look_at(light_pos, centroid, up);
 
     // Transform corners to light space
     Vec3 min_pt( 1e9f,  1e9f,  1e9f);
@@ -121,7 +123,7 @@ Mat44 ShadowMap::compute_directional_shadow_matrix(
     max_pt.z += 100.0f;
 
     // Texel snapping to eliminate shadow edge shimmering
-    const float res = static_cast<float>(shadow_resolution);
+    const float res = static_cast<float>(std::max(1u, shadow_resolution));
     const float units_per_texel_x = (max_pt.x - min_pt.x) / res;
     const float units_per_texel_y = (max_pt.y - min_pt.y) / res;
 
@@ -134,7 +136,7 @@ Mat44 ShadowMap::compute_directional_shadow_matrix(
         max_pt.y = std::floor(max_pt.y / units_per_texel_y) * units_per_texel_y;
     }
 
-    // Orthographic projection for Vulkan (Z in [0, 1])
+    // Orthographic projection for Vulkan/OpenGL (Z in [0, 1])
     const float dx = max_pt.x - min_pt.x;
     const float dy = max_pt.y - min_pt.y;
     const float dz = max_pt.z - min_pt.z;
@@ -149,6 +151,53 @@ Mat44 ShadowMap::compute_directional_shadow_matrix(
     light_proj.m[15] = 1.0f;
 
     return light_proj * light_view;
+}
+
+Mat44 ShadowMap::compute_directional_shadow_matrix(
+    const Light3D& sun,
+    const Camera3D& camera,
+    float shadow_distance,
+    uint32_t shadow_resolution
+) noexcept {
+    const float z_near = camera.get_near_clip();
+    const float z_far = std::min(camera.get_far_clip(), shadow_distance);
+    return compute_directional_slice_matrix(sun, camera, z_near, z_far, shadow_resolution);
+}
+
+void ShadowMap::compute_cascades(
+    const Light3D& sun,
+    const Camera3D& camera,
+    float shadow_distance,
+    uint32_t shadow_resolution,
+    Mat44 out_matrices[MAX_CASCADES],
+    float out_splits[MAX_CASCADES],
+    float lambda
+) noexcept {
+    const float z_near = std::max(1e-3f, camera.get_near_clip());
+    const float z_far = std::max(z_near + 1.0f, std::min(camera.get_far_clip(), shadow_distance));
+    const float ratio = z_far / z_near;
+    const float range = z_far - z_near;
+    const float l = std::clamp(lambda, 0.0f, 1.0f);
+
+    float prev_split = z_near;
+    for (uint32_t i = 0; i < MAX_CASCADES; ++i) {
+        const float p = static_cast<float>(i + 1) / static_cast<float>(MAX_CASCADES);
+        const float log_split = z_near * std::pow(ratio, p);
+        const float uni_split = z_near + range * p;
+        const float d = l * log_split + (1.0f - l) * uni_split;
+        out_splits[i] = d;
+        out_matrices[i] = compute_directional_slice_matrix(sun, camera, prev_split, d, shadow_resolution);
+        prev_split = d;
+    }
+}
+
+uint32_t ShadowMap::select_cascade(float view_depth) const noexcept {
+    for (uint32_t i = 0; i < MAX_CASCADES; ++i) {
+        if (view_depth <= cascade_splits[i]) {
+            return i;
+        }
+    }
+    return MAX_CASCADES - 1;
 }
 
 Vec3 ShadowMap::get_vogel_disk_sample(size_t index, size_t count, float phi) noexcept {

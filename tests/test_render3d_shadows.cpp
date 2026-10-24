@@ -127,6 +127,28 @@ void test_shadow_settings_defaults() {
     settings.enable_contact_shadows = true;
     TEST_ASSERT(settings.enable_pcss, "PCSS soft shadows can be explicitly enabled");
     TEST_ASSERT(settings.enable_contact_shadows, "Contact shadows can be explicitly enabled");
+
+    // Test 4-Cascade CSM Practical Split Scheme
+    Camera3D cam;
+    cam.set_look_at(Vec3(0.0f, 5.0f, 10.0f), Vec3(0.0f, 0.0f, 0.0f));
+    cam.set_perspective(1.0472f, 16.0f / 9.0f, 0.1f, 100.0f);
+
+    Light3D sun = Light3D::create_directional(Vec3(-0.3f, -1.0f, -0.5f).normalized());
+    ShadowMap sm(2048, 2048);
+    sm.settings.cascade_count = 4;
+    sm.settings.cascade_split_lambda = 0.75f;
+    ShadowMap::compute_cascades(sun, cam, 80.0f, 2048, sm.cascade_matrices, sm.cascade_splits, 0.75f);
+
+    TEST_ASSERT(sm.cascade_splits[0] > 0.1f, "Cascade 0 split > z_near");
+    TEST_ASSERT(sm.cascade_splits[1] > sm.cascade_splits[0], "Cascade 1 split > Cascade 0");
+    TEST_ASSERT(sm.cascade_splits[2] > sm.cascade_splits[1], "Cascade 2 split > Cascade 1");
+    TEST_ASSERT(approx(sm.cascade_splits[3], 80.0f, 0.01f), "Cascade 3 split equals max shadow distance");
+
+    for (uint32_t c = 0; c < 4; ++c) {
+        TEST_ASSERT(sm.cascade_matrices[c].determinant() != 0.0f, "Cascade orthographic light-space matrix is non-singular");
+    }
+    TEST_ASSERT(sm.select_cascade(1.0f) == 0, "Near depth selects Cascade 0");
+    TEST_ASSERT(sm.select_cascade(75.0f) == 3, "Far depth selects Cascade 3");
 }
 
 int main() {

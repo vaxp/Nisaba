@@ -42,6 +42,16 @@ public:
     bool set_uniform(std::string_view name, float x, float y, float z, float w);
     bool set_uniform(std::string_view name, const Mat44& mat, bool transpose = false);
 
+    // Zero-overhead pre-cached uniform location setters for inner draw loop
+    static void set_uniform_mat4(int loc, const Mat44& mat, bool transpose = false) noexcept;
+    static void set_uniform_vec3(int loc, const Vec3& v) noexcept;
+    static void set_uniform_int(int loc, int value) noexcept;
+
+    [[nodiscard]] int loc_model() const noexcept { return m_loc_model; }
+    [[nodiscard]] int loc_normal_matrix() const noexcept { return m_loc_normal_matrix; }
+    [[nodiscard]] int loc_is_instanced() const noexcept { return m_loc_is_instanced; }
+    [[nodiscard]] int loc_has_skinning() const noexcept { return m_loc_has_skinning; }
+
     // Uniform Block (UBO) Binding index assignment
     bool set_uniform_block_binding(std::string_view block_name, uint32_t binding_point);
 
@@ -59,6 +69,11 @@ private:
     bool m_is_valid{false};
     std::string m_log;
     std::unordered_map<std::string, int> m_uniform_cache;
+
+    int m_loc_model{-1};
+    int m_loc_normal_matrix{-1};
+    int m_loc_is_instanced{-1};
+    int m_loc_has_skinning{-1};
 
     void cleanup() noexcept;
 };

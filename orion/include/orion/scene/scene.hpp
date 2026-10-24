@@ -23,6 +23,8 @@ public:
     std::shared_ptr<EnvironmentMap> environment_map;
     SphericalHarmonics9 sh_irradiance;
     float environment_intensity{1.0f};
+    bool render_skybox{false};
+    float skybox_blur{0.0f};
 
     Scene3D() = default;
 

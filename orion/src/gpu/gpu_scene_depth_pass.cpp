@@ -6,6 +6,10 @@ namespace orion {
 
 GpuSceneDepthPass::GpuSceneDepthPass() {
     m_depth_shader = GlShaderProgram::create_shadow_depth_shader();
+    if (m_depth_shader && m_depth_shader->is_valid()) {
+        m_loc_view_proj = m_depth_shader->get_uniform_location("u_lightSpaceMatrix");
+        m_loc_model = m_depth_shader->get_uniform_location("u_model");
+    }
 }
 
 GpuSceneDepthPass::~GpuSceneDepthPass() {
@@ -78,7 +82,11 @@ void GpuSceneDepthPass::begin(uint32_t width, uint32_t height, const Mat44& view
 
     if (m_depth_shader && m_depth_shader->is_valid()) {
         m_depth_shader->bind();
-        m_depth_shader->set_uniform("u_lightSpaceMatrix", m_view_projection);
+        if (m_loc_view_proj >= 0) {
+            glUniformMatrix4fv(m_loc_view_proj, 1, GL_TRUE, m_view_projection.m);
+        } else {
+            m_depth_shader->set_uniform("u_lightSpaceMatrix", m_view_projection);
+        }
     }
 }
 
@@ -89,7 +97,11 @@ void GpuSceneDepthPass::render_object(
 ) {
     if (!m_depth_shader || !m_depth_shader->is_valid()) return;
 
-    m_depth_shader->set_uniform("u_model", world_transform);
+    if (m_loc_model >= 0) {
+        glUniformMatrix4fv(m_loc_model, 1, GL_TRUE, world_transform.m);
+    } else {
+        m_depth_shader->set_uniform("u_model", world_transform);
+    }
 
     auto handle = cache.get_or_upload_mesh(mesh);
     if (!handle.is_valid || handle.vao == 0) return;

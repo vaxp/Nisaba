@@ -24,6 +24,12 @@ struct VertexSkinData {
     float weights[4]{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
+/// @brief Morph target (blend shape) vertex displacement channel matching glTF morph targets.
+struct MorphTarget3D {
+    std::vector<Vec3> position_deltas;
+    std::vector<Vec3> normal_deltas;
+};
+
 /// @brief Complete 3D polygonal geometry container supporting multi-submesh slicing,
 /// automated normal/tangent generation, and CPU/GPU memory buffer management.
 class Mesh3D {
@@ -32,6 +38,8 @@ public:
     std::vector<uint32_t> indices;
     std::vector<SubMesh> submeshes;
     std::vector<VertexSkinData> skin_data;
+    std::vector<MorphTarget3D> morph_targets;
+    std::vector<float> morph_weights;
     AABB bounds;
 
     VertexBuffer3D vertex_buffer;
@@ -40,6 +48,10 @@ public:
     Mesh3D() = default;
 
     [[nodiscard]] bool has_skinning() const noexcept { return !skin_data.empty(); }
+    [[nodiscard]] bool has_morph_targets() const noexcept { return !morph_targets.empty(); }
+
+    /// @brief Applies weighted morph target displacements from a base mesh into this mesh's vertices.
+    void apply_morph_targets(const Mesh3D& base_mesh, const std::vector<float>& weights) noexcept;
 
     /// @brief Computes local bounding box for the entire mesh and each submesh.
     void compute_bounds() noexcept;

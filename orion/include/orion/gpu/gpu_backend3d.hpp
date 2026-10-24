@@ -7,6 +7,7 @@
 #include "orion/gpu/gpu_resource_cache.hpp"
 #include "orion/gpu/gpu_shadow_pass.hpp"
 #include "orion/gpu/gpu_scene_depth_pass.hpp"
+#include "orion/lighting/cluster_grid.hpp"
 #include "orion/postprocess/postprocess_pipeline.hpp"
 #include <memory>
 #include <cstdint>
@@ -45,16 +46,22 @@ public:
 
 private:
     Renderer3D m_cpu_renderer;
+    ClusterGrid m_cluster_grid{16, 9, 24};
     GpuResourceCache m_resource_cache;
     GpuShadowPass m_shadow_pass;
     GpuSceneDepthPass m_depth_pass;
     PostProcessPipeline m_postprocess;
     std::unique_ptr<GlShaderProgram> m_pbr_shader;
     std::unique_ptr<GlShaderProgram> m_advanced_pbr_shader;
+    std::unique_ptr<GlShaderProgram> m_skybox_shader;
+    uint32_t m_skybox_vao{0};
+    int32_t m_loc_sh[9]{-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    int32_t m_loc_cascade_matrices[4]{-1, -1, -1, -1};
 
     uint32_t m_hdr_fbo{0};
     uint32_t m_hdr_color_tex{0};
     uint32_t m_hdr_depth_rbo{0};
+    uint32_t m_refraction_tex{0};
     uint32_t m_hdr_width{0};
     uint32_t m_hdr_height{0};
 

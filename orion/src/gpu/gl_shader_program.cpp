@@ -110,6 +110,10 @@ bool GlShaderProgram::compile_and_link(std::string_view vertex_src, std::string_
     glDeleteShader(frag_shader);
 
     m_is_valid = true;
+    m_loc_model = get_uniform_location("u_model");
+    m_loc_normal_matrix = get_uniform_location("u_normalMatrix");
+    m_loc_is_instanced = get_uniform_location("u_isInstanced");
+    m_loc_has_skinning = get_uniform_location("u_hasSkinning");
     return true;
 }
 
@@ -178,6 +182,24 @@ bool GlShaderProgram::set_uniform(std::string_view name, const Mat44& mat, bool 
     return true;
 }
 
+void GlShaderProgram::set_uniform_mat4(int loc, const Mat44& mat, bool transpose) noexcept {
+    if (loc >= 0) {
+        glUniformMatrix4fv(loc, 1, transpose ? GL_FALSE : GL_TRUE, mat.m);
+    }
+}
+
+void GlShaderProgram::set_uniform_vec3(int loc, const Vec3& v) noexcept {
+    if (loc >= 0) {
+        glUniform3f(loc, v.x, v.y, v.z);
+    }
+}
+
+void GlShaderProgram::set_uniform_int(int loc, int value) noexcept {
+    if (loc >= 0) {
+        glUniform1i(loc, value);
+    }
+}
+
 bool GlShaderProgram::set_uniform_block_binding(std::string_view block_name, uint32_t binding_point) {
     if (!m_is_valid) return false;
     std::string str_name(block_name);
@@ -196,6 +218,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
 layout(location = 3) in vec2 inTexCoord0;
 layout(location = 4) in vec2 inTexCoord1;
+layout(location = 5) in vec4 inBoneIndices;
+layout(location = 6) in vec4 inBoneWeights;
 
 layout(std140) uniform CameraUBO {
     mat4 view;
@@ -204,9 +228,24 @@ layout(std140) uniform CameraUBO {
     vec3 cameraPosition;
 } camera;
 
+layout(std140) uniform SkinningUBO {
+    mat4 bones[128];
+} skinning;
+
+struct InstanceTransform {
+    mat4 model;
+    mat4 normalMatrix;
+};
+
+layout(std140) uniform InstancingUBO {
+    InstanceTransform instances[128];
+} instancing;
+
 uniform mat4 u_model;
 uniform mat4 u_normalMatrix;
 uniform mat4 u_lightSpaceMatrix;
+uniform int u_hasSkinning;
+uniform int u_isInstanced;
 
 out vec3 v_worldPos;
 out vec3 v_normal;
@@ -215,10 +254,28 @@ out vec2 v_uv0;
 out vec4 v_fragPosLightSpace;
 
 void main() {
-    vec4 worldPos = u_model * vec4(inPosition, 1.0);
+    vec4 localPos = vec4(inPosition, 1.0);
+    vec3 localNormal = inNormal;
+    vec3 localTangent = inTangent.xyz;
+
+    if (u_hasSkinning != 0) {
+        ivec4 j = clamp(ivec4(inBoneIndices + 0.5), ivec4(0), ivec4(127));
+        mat4 skinMat = inBoneWeights.x * skinning.bones[j.x]
+                     + inBoneWeights.y * skinning.bones[j.y]
+                     + inBoneWeights.z * skinning.bones[j.z]
+                     + inBoneWeights.w * skinning.bones[j.w];
+        localPos = skinMat * localPos;
+        localNormal = mat3(skinMat) * localNormal;
+        localTangent = mat3(skinMat) * localTangent;
+    }
+
+    mat4 modelMat = (u_isInstanced != 0) ? instancing.instances[gl_InstanceID].model : u_model;
+    mat4 normMat  = (u_isInstanced != 0) ? instancing.instances[gl_InstanceID].normalMatrix : u_normalMatrix;
+
+    vec4 worldPos = modelMat * localPos;
     v_worldPos = worldPos.xyz;
-    v_normal = normalize((u_normalMatrix * vec4(inNormal, 0.0)).xyz);
-    v_tangent = vec4(normalize((u_normalMatrix * vec4(inTangent.xyz, 0.0)).xyz), inTangent.w);
+    v_normal = normalize((normMat * vec4(localNormal, 0.0)).xyz);
+    v_tangent = vec4(normalize((normMat * vec4(localTangent, 0.0)).xyz), inTangent.w);
     v_uv0 = inTexCoord0;
     v_fragPosLightSpace = u_lightSpaceMatrix * worldPos;
     gl_Position = camera.viewProjection * worldPos;
@@ -293,7 +350,19 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+    float x = clamp(1.0 - cosTheta, 0.0, 1.0);
+    float x2 = x * x;
+    return F0 + (1.0 - F0) * (x2 * x2 * x);
+}
+
+vec3 evaluateIridescence(float cosTheta, float thicknessNm) {
+    float filmIor = 1.3;
+    float sin2_t1 = max(0.0, 1.0 - cosTheta * cosTheta);
+    float sin2_t2 = sin2_t1 / (filmIor * filmIor);
+    float cos_t2 = sqrt(max(0.0, 1.0 - sin2_t2));
+    float opd = 2.0 * filmIor * thicknessNm * cos_t2;
+    vec3 phase = (2.0 * PI * opd) / vec3(650.0, 530.0, 460.0) + vec3(PI);
+    return clamp(0.5 + 0.5 * cos(phase), vec3(0.0), vec3(1.0));
 }
 
 float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
@@ -427,6 +496,8 @@ void main() {
 
     program->set_uniform_block_binding("CameraUBO", 0);
     program->set_uniform_block_binding("MaterialUBO", 2);
+    program->set_uniform_block_binding("SkinningUBO", 3);
+    program->set_uniform_block_binding("InstancingUBO", 4);
 
     program->bind();
     program->set_uniform("u_baseColorTexture", 0);
@@ -435,6 +506,8 @@ void main() {
     program->set_uniform("u_occlusionTexture", 3);
     program->set_uniform("u_emissiveTexture", 4);
     program->set_uniform("u_shadowMap", 5);
+    program->set_uniform("u_hasSkinning", 0);
+    program->set_uniform("u_isInstanced", 0);
     program->unbind();
 
     return program;
@@ -447,6 +520,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
 layout(location = 3) in vec2 inTexCoord0;
 layout(location = 4) in vec2 inTexCoord1;
+layout(location = 5) in vec4 inBoneIndices;
+layout(location = 6) in vec4 inBoneWeights;
 
 layout(std140) uniform CameraUBO {
     mat4 view;
@@ -455,21 +530,57 @@ layout(std140) uniform CameraUBO {
     vec3 cameraPosition;
 } camera;
 
+layout(std140) uniform SkinningUBO {
+    mat4 bones[128];
+} skinning;
+
+struct InstanceTransform {
+    mat4 model;
+    mat4 normalMatrix;
+};
+
+layout(std140) uniform InstancingUBO {
+    InstanceTransform instances[128];
+} instancing;
+
 uniform mat4 u_model;
 uniform mat4 u_normalMatrix;
 uniform mat4 u_lightSpaceMatrix;
+uniform int u_hasSkinning;
+uniform int u_isInstanced;
 
 out vec3 v_worldPos;
 out vec3 v_normal;
 out vec4 v_tangent;
 out vec2 v_uv0;
 out vec4 v_fragPosLightSpace;
+out float v_viewDepth;
 
 void main() {
-    vec4 worldPos = u_model * vec4(inPosition, 1.0);
+    vec4 localPos = vec4(inPosition, 1.0);
+    vec3 localNormal = inNormal;
+    vec3 localTangent = inTangent.xyz;
+
+    if (u_hasSkinning != 0) {
+        ivec4 j = clamp(ivec4(inBoneIndices + 0.5), ivec4(0), ivec4(127));
+        mat4 skinMat = inBoneWeights.x * skinning.bones[j.x]
+                     + inBoneWeights.y * skinning.bones[j.y]
+                     + inBoneWeights.z * skinning.bones[j.z]
+                     + inBoneWeights.w * skinning.bones[j.w];
+        localPos = skinMat * localPos;
+        localNormal = mat3(skinMat) * localNormal;
+        localTangent = mat3(skinMat) * localTangent;
+    }
+
+    mat4 modelMat = (u_isInstanced != 0) ? instancing.instances[gl_InstanceID].model : u_model;
+    mat4 normMat  = (u_isInstanced != 0) ? instancing.instances[gl_InstanceID].normalMatrix : u_normalMatrix;
+
+    vec4 worldPos = modelMat * localPos;
     v_worldPos = worldPos.xyz;
-    v_normal = normalize((u_normalMatrix * vec4(inNormal, 0.0)).xyz);
-    v_tangent = vec4(normalize((u_normalMatrix * vec4(inTangent.xyz, 0.0)).xyz), inTangent.w);
+    vec4 viewPos = camera.view * worldPos;
+    v_viewDepth = -viewPos.z;
+    v_normal = normalize((normMat * vec4(localNormal, 0.0)).xyz);
+    v_tangent = vec4(normalize((normMat * vec4(localTangent, 0.0)).xyz), inTangent.w);
     v_uv0 = inTexCoord0;
     v_fragPosLightSpace = u_lightSpaceMatrix * worldPos;
     gl_Position = camera.viewProjection * worldPos;
@@ -482,6 +593,7 @@ in vec3 v_normal;
 in vec4 v_tangent;
 in vec2 v_uv0;
 in vec4 v_fragPosLightSpace;
+in float v_viewDepth;
 
 layout(std140) uniform CameraUBO {
     mat4 view;
@@ -505,7 +617,7 @@ layout(std140) uniform MaterialUBO {
     float clearCoat;
     float clearCoatRoughness;
     float anisotropy;
-    float pad0;
+    float iridescence;
     vec3 sheenColor;
     float sheenRoughness;
     vec3 subsurfaceColor;
@@ -513,9 +625,9 @@ layout(std140) uniform MaterialUBO {
     float subsurfacePower;
     float transmission;
     float ior;
-    float pad1;
+    float iridescenceThickness;
     vec3 absorption;
-    float pad2;
+    float dispersion;
 } material;
 
 struct GpuLightData {
@@ -544,6 +656,9 @@ uniform sampler2D u_shadowMap;
 uniform sampler2D u_dfgLut;
 uniform samplerCube u_environmentMap;
 uniform sampler2D u_sceneDepthTexture;
+uniform sampler2D u_clusterCellsTex;
+uniform sampler2D u_clusterIndicesTex;
+uniform sampler2D u_sceneColorTexture;
 
 uniform vec3 u_lightDirection;
 uniform vec3 u_lightColor;
@@ -561,6 +676,13 @@ uniform float u_contactShadowRayLength;
 uniform float u_contactShadowThickness;
 uniform int u_contactShadowSteps;
 uniform int u_outputHdr;
+uniform int u_useClusterGrid;
+uniform int u_hasSceneRefraction;
+uniform vec2 u_viewportSize;
+
+uniform int u_cascadeCount;
+uniform vec4 u_cascadeSplits;
+uniform mat4 u_cascadeMatrices[4];
 
 out vec4 FragColor;
 
@@ -598,7 +720,19 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+    float x = clamp(1.0 - cosTheta, 0.0, 1.0);
+    float x2 = x * x;
+    return F0 + (1.0 - F0) * (x2 * x2 * x);
+}
+
+vec3 evaluateIridescence(float cosTheta, float thicknessNm) {
+    float filmIor = 1.3;
+    float sin2_t1 = max(0.0, 1.0 - cosTheta * cosTheta);
+    float sin2_t2 = sin2_t1 / (filmIor * filmIor);
+    float cos_t2 = sqrt(max(0.0, 1.0 - sin2_t2));
+    float opd = 2.0 * filmIor * thicknessNm * cos_t2;
+    vec3 phase = (2.0 * PI * opd) / vec3(650.0, 530.0, 460.0) + vec3(PI);
+    return clamp(0.5 + 0.5 * cos(phase), vec3(0.0), vec3(1.0));
 }
 
 float DistributionCharlie(float NoH, float roughness) {
@@ -720,16 +854,38 @@ float calculateContactShadow(vec3 worldPos, vec3 lightDir, vec3 normal) {
 }
 
 float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
-    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) return 0.0;
+    vec3 projCoords;
+    vec2 uvMin = vec2(0.0);
+    vec2 uvMax = vec2(1.0);
+    float uvScale = 1.0;
+
+    if (u_cascadeCount > 1) {
+        int c = 0;
+        if (v_viewDepth > u_cascadeSplits.z) c = 3;
+        else if (v_viewDepth > u_cascadeSplits.y) c = 2;
+        else if (v_viewDepth > u_cascadeSplits.x) c = 1;
+
+        vec4 cClip = u_cascadeMatrices[c] * vec4(v_worldPos, 1.0);
+        projCoords = (cClip.xyz / cClip.w) * 0.5 + 0.5;
+        if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) return 0.0;
+
+        vec2 quadOffset = vec2(float(c & 1) * 0.5, float((c >> 1) & 1) * 0.5);
+        projCoords.xy = projCoords.xy * 0.5 + quadOffset;
+        uvMin = quadOffset + vec2(0.0005);
+        uvMax = quadOffset + vec2(0.4995);
+        uvScale = 0.5;
+    } else {
+        projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+        projCoords = projCoords * 0.5 + 0.5;
+        if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) return 0.0;
+    }
 
     float currentDepth = projCoords.z;
     float bias = max(0.008 * (1.0 - dot(normal, lightDir)), 0.001);
     float baseShadow = 0.0;
 
     if (u_enablePcss != 0) {
-        vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0));
+        vec2 texelSize = uvScale / vec2(textureSize(u_shadowMap, 0));
         float noise = interleavedGradientNoise(gl_FragCoord.xy);
         float phi = noise * 2.0 * PI;
 
@@ -739,7 +895,8 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
 
         for (int i = 0; i < 16; ++i) {
             vec2 offset = vogelDiskSample(i, 16, phi) * searchRadius * texelSize;
-            float blockerDepth = texture(u_shadowMap, projCoords.xy + offset).r;
+            vec2 sampleUV = clamp(projCoords.xy + offset, uvMin, uvMax);
+            float blockerDepth = texture(u_shadowMap, sampleUV).r;
             if (blockerDepth < currentDepth - bias) {
                 blockerSum += blockerDepth;
                 blockerCount++;
@@ -756,16 +913,18 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
             float pcfSum = 0.0;
             for (int i = 0; i < 24; ++i) {
                 vec2 offset = vogelDiskSample(i, 24, phi) * filterRadius * texelSize;
-                float pcfDepth = texture(u_shadowMap, projCoords.xy + offset).r;
+                vec2 sampleUV = clamp(projCoords.xy + offset, uvMin, uvMax);
+                float pcfDepth = texture(u_shadowMap, sampleUV).r;
                 pcfSum += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
             }
             baseShadow = pcfSum / 24.0;
         }
     } else {
-        vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0));
+        vec2 texelSize = uvScale / vec2(textureSize(u_shadowMap, 0));
         for (int x = -1; x <= 1; ++x) {
             for (int y = -1; y <= 1; ++y) {
-                float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+                vec2 sampleUV = clamp(projCoords.xy + vec2(x, y) * texelSize, uvMin, uvMax);
+                float pcfDepth = texture(u_shadowMap, sampleUV).r;
                 baseShadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
             }
         }
@@ -782,7 +941,7 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
 vec3 evaluateShadingModel(
     vec3 L, vec3 radiance, float shadowFactor,
     vec3 N, vec3 N_geom, vec3 V, vec3 T, vec3 B,
-    vec3 baseColor, float metallic, float roughness, vec3 F0
+    vec3 baseColor, float metallic, float roughness, vec3 F0, vec3 energyCompensation
 ) {
     vec3 H = normalize(V + L);
     float NdotL = max(dot(N, L), 0.0);
@@ -792,12 +951,17 @@ vec3 evaluateShadingModel(
     float LdotH = max(dot(L, H), 0.0);
 
     vec3 F = fresnelSchlick(VdotH, F0);
+    if (material.iridescence > 0.001) {
+        vec3 iridF = evaluateIridescence(VdotH, max(material.iridescenceThickness, 100.0));
+        F = mix(F, iridF, clamp(material.iridescence, 0.0, 1.0));
+    }
+
     float NDF = DistributionGGX(N, H, roughness);
     float G = GeometrySmith(N, V, L, roughness);
 
     vec3 numerator = NDF * G * F;
     float denominator = 4.0 * NdotV * NdotL + 0.0001;
-    vec3 specular = numerator / denominator;
+    vec3 specular = (numerator / denominator) * energyCompensation;
 
     vec3 kS = F;
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
@@ -819,7 +983,7 @@ vec3 evaluateShadingModel(
         float ab = max(roughness * (1.0 - material.anisotropy), 0.0016);
         float D_aniso = DistributionAnisotropic(at, ab, dot(T, H), dot(B, H), NdotH);
         float V_aniso = VisibilityAnisotropic(at, ab, dot(T, V), dot(B, V), dot(T, L), dot(B, L), NdotV, NdotL);
-        vec3 specAniso = (D_aniso * V_aniso) * F;
+        vec3 specAniso = (D_aniso * V_aniso) * F * energyCompensation;
 
         contrib = (kD * baseColor / PI + specAniso) * radiance * NdotL;
     }
@@ -921,9 +1085,12 @@ void main() {
 
     vec3 V = normalize(camera.cameraPosition - v_worldPos);
     vec3 F0 = mix(vec3(0.04), baseColor.rgb, metallic);
+    float NoV = clamp(dot(N, V), 1e-4, 1.0);
+    vec2 dfg = texture(u_dfgLut, vec2(NoV, filtered_roughness)).rg;
+    vec3 energyCompensation = 1.0 + F0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
 
     // Fast-path for standard PBR walkthroughs on integrated/low-power GPUs (guarantees 65+ FPS)
-    if (material.shadingModel == SHADING_MODEL_STANDARD && u_hasEnvironmentMap == 0 && lighting.u_lightCount <= 1u) {
+    if (material.shadingModel == SHADING_MODEL_STANDARD && material.iridescence <= 0.001 && u_hasEnvironmentMap == 0 && lighting.u_lightCount <= 1u && u_cascadeCount <= 1) {
         vec3 L = normalize(-u_lightDirection);
         vec3 H = normalize(V + L);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
@@ -931,7 +1098,7 @@ void main() {
         float G = GeometrySmith(N, V, L, filtered_roughness);
         vec3 numerator = NDF * G * F;
         float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-        vec3 specular = numerator / denominator;
+        vec3 specular = (numerator / denominator) * energyCompensation;
         vec3 kS = F;
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
         float NdotL = max(dot(N, L), 0.0);
@@ -976,7 +1143,32 @@ void main() {
 
     if (lighting.u_lightCount > 0u) {
         uint numLights = min(lighting.u_lightCount, 128u);
-        for (uint i = 0u; i < numLights; ++i) {
+        uint clusterOffset = 0u;
+        uint loopCount = numLights;
+        bool useClusterList = (u_useClusterGrid != 0 && numLights > 4u);
+
+        if (useClusterList) {
+            vec2 screenUV = clamp(gl_FragCoord.xy / max(u_viewportSize, vec2(1.0)), vec2(0.0), vec2(0.9999));
+            int cx = clamp(int(screenUV.x * float(lighting.u_clusterDimX)), 0, int(lighting.u_clusterDimX) - 1);
+            int cy = clamp(int(screenUV.y * float(lighting.u_clusterDimY)), 0, int(lighting.u_clusterDimY) - 1);
+            float zNear = max(lighting.u_clusterZParams.x, 1e-3);
+            float zFar = max(lighting.u_clusterZParams.y, zNear + 1.0);
+            float logFactor = lighting.u_clusterZParams.z;
+            float d = clamp(v_viewDepth, zNear, zFar);
+            int cz = clamp(int(floor(log(d / zNear) * logFactor)), 0, int(lighting.u_clusterDimZ) - 1);
+            int cellX = cx + cy * int(lighting.u_clusterDimX);
+            vec2 cellData = texelFetch(u_clusterCellsTex, ivec2(cellX, cz), 0).rg;
+            clusterOffset = uint(cellData.r + 0.5);
+            loopCount = min(uint(cellData.g + 0.5), 128u);
+        }
+
+        for (uint idx = 0u; idx < loopCount; ++idx) {
+            uint i = idx;
+            if (useClusterList) {
+                uint flatIdx = clusterOffset + idx;
+                ivec2 idxCoord = ivec2(int(flatIdx & 1023u), int(flatIdx >> 10u));
+                i = min(uint(texelFetch(u_clusterIndicesTex, idxCoord, 0).r + 0.5), 127u);
+            }
             GpuLightData l = lighting.lights[i];
             vec3 lightPos = l.position_radius.xyz;
             float lightRange = l.position_radius.w;
@@ -996,7 +1188,7 @@ void main() {
                 directLight += evaluateShadingModel(
                     L, lightCol * lightIntensity, shadow,
                     N, N_geom, V, T, B,
-                    baseColor.rgb, metallic, filtered_roughness, F0
+                    baseColor.rgb, metallic, filtered_roughness, F0, energyCompensation
                 );
             } else {
                 // Point, Spot, or Sphere Light
@@ -1049,7 +1241,7 @@ void main() {
                 directLight += evaluateShadingModel(
                     L, lightCol * (lightIntensity * att), shadow,
                     N, N_geom, V, T, B,
-                    baseColor.rgb, metallic, current_roughness, F0
+                    baseColor.rgb, metallic, current_roughness, F0, energyCompensation
                 );
             }
         }
@@ -1060,7 +1252,7 @@ void main() {
         directLight = evaluateShadingModel(
             L, u_lightColor * u_lightIntensity, shadow,
             N, N_geom, V, T, B,
-            baseColor.rgb, metallic, filtered_roughness, F0
+            baseColor.rgb, metallic, filtered_roughness, F0, energyCompensation
         );
     }
 
@@ -1079,18 +1271,21 @@ void main() {
     vec3 fallbackAmbient = mix(groundAmbient, skyAmbient, hemiFactor);
 
     // Image-Based Lighting Evaluation
-    float NoV = clamp(dot(N, V), 1e-4, 1.0);
     vec3 diffuseIrradiance = (u_hasEnvironmentMap != 0) ? (evaluateSH9(N) * u_envIntensity) : fallbackAmbient;
     vec3 multiAO = evaluateMultiBounceAO(ao, baseColor.rgb);
     vec3 indirectDiffuse = (vec3(1.0) - F0) * (1.0 - metallic) * baseColor.rgb * diffuseIrradiance * multiAO;
 
-    // Specular Radiance from Environment Map (MIP-filtered roughness)
+    // Specular Radiance from Environment Map (MIP-filtered roughness + Multiple-Scattering Energy Compensation)
     vec3 R = reflect(-V, N);
     float lod = 5.0 * filtered_roughness * (2.0 - filtered_roughness);
     vec3 envSpecular = (u_hasEnvironmentMap != 0) ? (textureLod(u_environmentMap, R, lod).rgb * u_envIntensity) : (fallbackAmbient * 0.5);
-    vec2 dfg = texture(u_dfgLut, vec2(NoV, filtered_roughness)).rg;
     float specAO = evaluateSpecularAO(NoV, ao);
-    vec3 indirectSpecular = envSpecular * (F0 * dfg.x + dfg.y) * specAO;
+    vec3 f0_ibl = F0;
+    if (material.iridescence > 0.001) {
+        vec3 iridF = evaluateIridescence(NoV, max(material.iridescenceThickness, 100.0));
+        f0_ibl = mix(F0, iridF, clamp(material.iridescence, 0.0, 1.0));
+    }
+    vec3 indirectSpecular = envSpecular * (f0_ibl * dfg.x + dfg.y) * energyCompensation * specAO;
 
     vec3 ambient = vec3(0.0);
 
@@ -1115,8 +1310,31 @@ void main() {
         ambient = indirectDiffuse * sssTint + indirectSpecular;
     }
     else if (material.shadingModel == SHADING_MODEL_TRANSMISSION) {
-        vec3 glassAbsorption = exp(-material.absorption * 0.5);
-        ambient = (indirectDiffuse * (1.0 - material.transmission) + indirectSpecular) * glassAbsorption;
+        float optThickness = max(material.thickness, 0.1);
+        vec3 glassAbsorption = exp(-max(vec3(1.0) - material.absorption, vec3(0.0)) * optThickness * 2.0) * material.absorption;
+        if (u_hasSceneRefraction != 0) {
+            float eta = 1.0 / max(material.ior, 1.001);
+            bool thinWalled = (material.dispersion < 0.0);
+            float disp = abs(material.dispersion);
+            vec3 refractRay = refract(-V, N, eta);
+            vec2 screenUV = gl_FragCoord.xy / max(u_viewportSize, vec2(1.0));
+            float refrScale = thinWalled ? 0.02 : (0.08 * optThickness);
+            vec2 uvOffset = refractRay.xy * refrScale;
+            float refrLod = 4.0 * filtered_roughness;
+            vec3 transmitted;
+            if (disp > 0.001) {
+                transmitted.r = textureLod(u_sceneColorTexture, clamp(screenUV + uvOffset * (1.0 - disp * 0.15), 0.001, 0.999), refrLod).r;
+                transmitted.g = textureLod(u_sceneColorTexture, clamp(screenUV + uvOffset, 0.001, 0.999), refrLod).g;
+                transmitted.b = textureLod(u_sceneColorTexture, clamp(screenUV + uvOffset * (1.0 + disp * 0.15), 0.001, 0.999), refrLod).b;
+            } else {
+                transmitted = textureLod(u_sceneColorTexture, clamp(screenUV + uvOffset, 0.001, 0.999), refrLod).rgb;
+            }
+            vec3 F_glass = fresnelSchlick(NoV, F0);
+            vec3 refractedContribution = transmitted * glassAbsorption * baseColor.rgb * (vec3(1.0) - F_glass) * material.transmission;
+            ambient = indirectDiffuse * (1.0 - material.transmission) + refractedContribution + indirectSpecular;
+        } else {
+            ambient = (indirectDiffuse * (1.0 - material.transmission) + indirectSpecular) * glassAbsorption;
+        }
     }
     else {
         ambient = indirectDiffuse + indirectSpecular;
@@ -1161,6 +1379,8 @@ void main() {
     program->set_uniform_block_binding("CameraUBO", 0);
     program->set_uniform_block_binding("LightingUBO", 1);
     program->set_uniform_block_binding("MaterialUBO", 2);
+    program->set_uniform_block_binding("SkinningUBO", 3);
+    program->set_uniform_block_binding("InstancingUBO", 4);
 
     // Default texture units
     program->bind();
@@ -1173,6 +1393,9 @@ void main() {
     program->set_uniform("u_dfgLut", 6);
     program->set_uniform("u_environmentMap", 7);
     program->set_uniform("u_sceneDepthTexture", 8);
+    program->set_uniform("u_clusterCellsTex", 9);
+    program->set_uniform("u_clusterIndicesTex", 10);
+    program->set_uniform("u_sceneColorTexture", 11);
 
     program->set_uniform("u_lightSize", 0.035f);
     program->set_uniform("u_enablePcss", 1);
@@ -1181,6 +1404,12 @@ void main() {
     program->set_uniform("u_contactShadowThickness", 0.05f);
     program->set_uniform("u_contactShadowSteps", 24);
     program->set_uniform("u_outputHdr", 0);
+    program->set_uniform("u_hasSkinning", 0);
+    program->set_uniform("u_isInstanced", 0);
+    program->set_uniform("u_useClusterGrid", 0);
+    program->set_uniform("u_hasSceneRefraction", 0);
+    program->set_uniform("u_cascadeCount", 1);
+    program->set_uniform("u_viewportSize", 1920.0f, 1080.0f);
     program->unbind();
 
     return program;

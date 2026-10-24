@@ -81,6 +81,9 @@ public:
     [[nodiscard]] uint32_t dim_z() const noexcept { return m_dim_z; }
     [[nodiscard]] float z_near() const noexcept { return m_z_near; }
     [[nodiscard]] float z_far() const noexcept { return m_z_far; }
+    [[nodiscard]] float log_factor() const noexcept { return m_log_factor; }
+    [[nodiscard]] std::span<const ClusterCell> cells() const noexcept { return m_cells; }
+    [[nodiscard]] std::span<const uint32_t> light_indices() const noexcept { return m_light_indices; }
 
 private:
     uint32_t m_dim_x{DEFAULT_CLUSTERS_X};
@@ -89,14 +92,30 @@ private:
     float m_z_near{0.1f};
     float m_z_far{100.0f};
     float m_log_factor{1.0f};
+    float m_tan_half_x{1.0f};
+    float m_tan_half_y{1.0f};
 
     std::vector<AABB> m_cluster_aabbs;
+    // SoA SIMD-friendly layout of cluster AABBs and depth slice bounds
+    std::vector<float> m_soa_min_x;
+    std::vector<float> m_soa_min_y;
+    std::vector<float> m_soa_min_z;
+    std::vector<float> m_soa_max_x;
+    std::vector<float> m_soa_max_y;
+    std::vector<float> m_soa_max_z;
+    std::vector<float> m_slice_z0;
+    std::vector<float> m_slice_z1;
+
     std::vector<ClusterCell> m_cells;
     std::vector<uint32_t> m_light_indices;
     std::vector<uint32_t> m_global_lights;
 
-    // Temporary per-cluster light accumulators for zero-allocation reuse
-    std::vector<std::vector<uint32_t>> m_cluster_temp_lists;
+    // Flat cache-friendly per-cluster light accumulators for zero-allocation reuse
+    static constexpr uint32_t MAX_CLUSTER_LOCAL_LIGHTS = 128;
+    std::vector<uint16_t> m_cluster_counts;
+    std::vector<uint32_t> m_cluster_light_slots;
+    std::vector<uint32_t> m_active_clusters;
+    uint32_t m_last_global_count{0xFFFFFFFFu};
 };
 
 } // namespace orion

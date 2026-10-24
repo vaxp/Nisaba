@@ -191,6 +191,25 @@ void test_advanced_brdf_evaluations() {
     // Subsurface evaluation
     Vec3 sss_eval = CookTorranceBRDF::evaluate_subsurface(n, v, l, Vec3(0.8f, 0.6f, 0.5f), Vec3(0.9f, 0.2f, 0.1f), 0.3f, 12.0f);
     TEST_ASSERT(sss_eval.x > 0.0f, "Subsurface BRDF produces positive radiance");
+
+    float dfg_y = CookTorranceBRDF::approximate_dfg_multiscatter(0.5f, 0.9f);
+    TEST_ASSERT(dfg_y > 0.0f && dfg_y < 1.0f, "Multiscatter DFG LUT approximation is within [0, 1]");
+    Vec3 ec = CookTorranceBRDF::evaluate_energy_compensation(Vec3(0.9f, 0.8f, 0.5f), dfg_y);
+    TEST_ASSERT(ec.x > 1.0f && ec.y > 1.0f, "Rough metallic surface receives >1.0 multiple-scattering energy boost");
+
+    Vec3 irid_f = CookTorranceBRDF::evaluate_iridescence(0.8f, 450.0f, 1.33f);
+    TEST_ASSERT(irid_f.x >= 0.0f && irid_f.x <= 1.0f, "Iridescence Fresnel R in [0, 1]");
+    TEST_ASSERT(irid_f.y >= 0.0f && irid_f.y <= 1.0f, "Iridescence Fresnel G in [0, 1]");
+    TEST_ASSERT(irid_f.z >= 0.0f && irid_f.z <= 1.0f, "Iridescence Fresnel B in [0, 1]");
+    TEST_ASSERT(std::abs(irid_f.x - irid_f.z) > 0.01f, "Thin-film interference produces spectral color shift across RGB");
+
+    auto irid_mat = PbrMaterial::create_iridescent(Vec4(0.1f, 0.1f, 0.1f, 1.0f), 1.0f, 450.0f, 0.15f);
+    irid_mat->dispersion = 0.05f;
+    auto u_irid = irid_mat->get_uniforms();
+    TEST_ASSERT(approx(u_irid.pad0, 1.0f), "Iridescence factor packed in PbrMaterialUniforms");
+    TEST_ASSERT(approx(u_irid.pad1, 450.0f), "Iridescence thickness nm packed in PbrMaterialUniforms");
+    TEST_ASSERT(approx(u_irid.pad2, 0.05f), "Dispersion factor packed in PbrMaterialUniforms");
+    TEST_ASSERT(approx(irid_mat->roughness_factor, 0.15f), "Iridescent roughness stored in PbrMaterial");
 }
 
 void test_brdf_ggx_distribution() {
