@@ -29,6 +29,14 @@ public:
         std::optional<Color> tint = std::nullopt
     );
 
+    /// @brief Bakes an SVG document into an anti-aliased RGBA8 pixel surface with a custom SvgTheme.
+    static BakedSvg bake(
+        const SvgDocument& doc,
+        uint32_t width,
+        uint32_t height,
+        const struct SvgTheme& theme
+    );
+
     /// @brief Draws the baked SVG onto the target Canvas at (x, y) with optional opacity.
     void draw(Canvas& canvas, float x, float y, float opacity = 1.0f) const;
 

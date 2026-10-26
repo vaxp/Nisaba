@@ -665,6 +665,16 @@ public:
         doc.render(*this, &dest_bounds);
     }
 
+    /// Renders an SVG document with an optional tint override.
+    void draw_svg(const svg::SvgDocument& doc, const Rect& dest_bounds, std::optional<Color> tint) {
+        doc.render(*this, &dest_bounds, tint);
+    }
+
+    /// Renders an SVG document with a dynamic SvgTheme (currentColor, CSS variables, ID overrides).
+    void draw_svg(const svg::SvgDocument& doc, const Rect& dest_bounds, const svg::SvgTheme& theme) {
+        doc.render(*this, &dest_bounds, theme);
+    }
+
     // --- Text & Glyph Rendering ---
 
     /// Draws an 8-bit alpha glyph mask positioned at (pos.x, pos.y).

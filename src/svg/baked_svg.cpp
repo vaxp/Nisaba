@@ -39,6 +39,38 @@ BakedSvg BakedSvg::bake(
     return baked;
 }
 
+BakedSvg BakedSvg::bake(
+    const SvgDocument& doc,
+    uint32_t width,
+    uint32_t height,
+    const SvgTheme& theme
+) {
+    if (width == 0 || height == 0) {
+        return BakedSvg();
+    }
+
+    auto pm_opt = Pixmap::allocate(width, height);
+    if (!pm_opt.has_value()) {
+        return BakedSvg();
+    }
+
+    auto& pm = *pm_opt;
+    pm.fill(Color::TRANSPARENT);
+
+    Canvas canvas(pm);
+    auto target_rect = Rect::from_xywh(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+    if (target_rect) {
+        doc.render(canvas, &(*target_rect), theme);
+    }
+
+    BakedSvg baked;
+    baked.pixmap_ = std::move(pm);
+    baked.width_ = width;
+    baked.height_ = height;
+    baked.tint_ = theme.tint_color;
+    return baked;
+}
+
 void BakedSvg::draw(Canvas& canvas, float x, float y, float opacity) const {
     if (!is_valid() || opacity <= 0.001f) return;
 

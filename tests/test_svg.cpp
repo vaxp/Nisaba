@@ -71,6 +71,22 @@ void test_path_parser_arcs() {
     std::cout << "  Elliptical arc verified." << std::endl;
 }
 
+void test_path_parser_minified() {
+    std::cout << "[Test] SVG PathParser zero-allocation minified syntax (.5.5, 10-20, flags 01)..." << std::endl;
+
+    // Concatenated decimals (.5.5), negative signs without spaces (10-20.5), compact arc flags (0150-25)
+    auto p_min = PathParser::parse("M.5.5l10-20.5.5.5a25,25-30 0150-25z");
+    assert(p_min.has_value());
+    assert(!p_min->is_empty());
+
+    // Scientific notation and chained cubic curves
+    auto p_sci = PathParser::parse("M1e1-2e1c5.5.5.5-5.5 10 0s5-5 10 0z");
+    assert(p_sci.has_value());
+    assert(!p_sci->is_empty());
+
+    std::cout << "  Minified SVG path grammar verified." << std::endl;
+}
+
 void test_svg_document() {
     std::cout << "[Test] SvgDocument parsing and elements..." << std::endl;
 
@@ -143,6 +159,7 @@ int main() {
     test_path_parser_basic();
     test_path_parser_curves();
     test_path_parser_arcs();
+    test_path_parser_minified();
     test_svg_document();
     test_svg_rendering();
     std::cout << "All SVG unit tests passed successfully!" << std::endl;

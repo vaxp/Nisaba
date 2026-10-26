@@ -115,6 +115,8 @@ public:
 
     // --- SVG Vector Graphics ---
     void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds);
+    void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds, std::optional<nisaba::Color> tint);
+    void draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds, const svg::SvgTheme& theme);
 
     // --- Typography & Hardware Text Rendering ---
     void draw_text(std::string_view text, float x, float y, const text::Font& font, const nisaba::Paint& paint, float font_size = 16.0f);

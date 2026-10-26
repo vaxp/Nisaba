@@ -669,52 +669,15 @@ void GpuCanvas::draw_glass_panel(const nisaba::Rect& rect, float rx, float ry, c
 }
 
 void GpuCanvas::draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds) {
-    save();
+    doc.render_gpu(*this, &dest_bounds);
+}
 
-    float vb_w = doc.view_box().width();
-    float vb_h = doc.view_box().height();
-    if (vb_w > 0.0f && vb_h > 0.0f) {
-        float sx = dest_bounds.width() / vb_w;
-        float sy = dest_bounds.height() / vb_h;
-        float s = std::min(sx, sy);
+void GpuCanvas::draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds, std::optional<nisaba::Color> tint) {
+    doc.render_gpu(*this, &dest_bounds, tint);
+}
 
-        float tx = dest_bounds.left() + (dest_bounds.width() - vb_w * s) * 0.5f - doc.view_box().left() * s;
-        float ty = dest_bounds.top() + (dest_bounds.height() - vb_h * s) * 0.5f - doc.view_box().top() * s;
-
-        translate(tx, ty);
-        scale(s, s);
-    }
-
-    for (const auto& elem : doc.elements()) {
-        save();
-        if (!elem.transform.is_identity()) {
-            concat(elem.transform);
-        }
-
-        // 1. Fill pass
-        if (elem.style.fill.has_value()) {
-            nisaba::Color fill_c = *elem.style.fill;
-            fill_c.apply_opacity(elem.style.opacity * elem.style.fill_opacity);
-            nisaba::Paint fill_paint(fill_c);
-            fill_path(elem.path, fill_paint, elem.style.fill_rule);
-        }
-
-        // 2. Stroke pass
-        if (elem.style.stroke.has_value() && elem.style.stroke_width > 0.0f) {
-            nisaba::Color stroke_c = *elem.style.stroke;
-            stroke_c.apply_opacity(elem.style.opacity * elem.style.stroke_opacity);
-            nisaba::Stroke st;
-            st.width = elem.style.stroke_width;
-            st.line_cap = elem.style.line_cap;
-            st.line_join = elem.style.line_join;
-            nisaba::Paint stroke_paint(stroke_c);
-            stroke_path(elem.path, stroke_paint, st);
-        }
-
-        restore();
-    }
-
-    restore();
+void GpuCanvas::draw_svg(const svg::SvgDocument& doc, const nisaba::Rect& dest_bounds, const svg::SvgTheme& theme) {
+    doc.render_gpu(*this, &dest_bounds, theme);
 }
 
 void GpuCanvas::flush() {

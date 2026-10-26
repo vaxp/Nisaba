@@ -1,7 +1,7 @@
 #include "nisaba/svg/svg_cache.hpp"
 #include "nisaba/canvas/canvas.hpp"
 
-#ifdef NISABA_HAS_GPU
+#if defined(NISABA_HAS_GPU) || defined(NISABA_GLEW)
 #include "nisaba/gpu/gpu_canvas.hpp"
 #endif
 
@@ -26,6 +26,25 @@ uint32_t SvgCache::pack_color(std::optional<Color> c) noexcept {
            (static_cast<uint32_t>(c->green() * 255.0f + 0.5f) << 16) |
            (static_cast<uint32_t>(c->blue() * 255.0f + 0.5f) << 8) |
            static_cast<uint32_t>(c->alpha() * 255.0f + 0.5f);
+}
+
+uint32_t SvgCache::hash_theme(const SvgTheme& theme) noexcept {
+    if (theme.empty()) return 0;
+    uint32_t h = pack_color(theme.tint_color);
+    h ^= (pack_color(theme.current_color) * 2654435761U);
+    for (const auto& [k, v] : theme.css_variables) {
+        uint32_t kh = static_cast<uint32_t>(compute_hash(k));
+        uint32_t vh = pack_color(v);
+        h ^= kh + 0x9e3779b9U + (h << 6) + (h >> 2);
+        h ^= vh + 0x9e3779b9U + (h << 6) + (h >> 2);
+    }
+    for (const auto& [k, v] : theme.id_color_overrides) {
+        uint32_t kh = static_cast<uint32_t>(compute_hash(k));
+        uint32_t vh = pack_color(v);
+        h ^= kh + 0x9e3779b9U + (h << 6) + (h >> 2);
+        h ^= vh + 0x9e3779b9U + (h << 6) + (h >> 2);
+    }
+    return h;
 }
 
 SvgCache::SvgCache(size_t max_entries) noexcept
@@ -54,12 +73,23 @@ const BakedSvg& SvgCache::get_or_bake(
     uint32_t height,
     std::optional<Color> tint
 ) {
+    SvgTheme theme;
+    theme.tint_color = tint;
+    return get_or_bake(svg_xml_or_path, width, height, theme);
+}
+
+const BakedSvg& SvgCache::get_or_bake(
+    std::string_view svg_xml_or_path,
+    uint32_t width,
+    uint32_t height,
+    const SvgTheme& theme
+) {
     if (svg_xml_or_path.empty() || width == 0 || height == 0) {
         return empty_fallback_;
     }
 
     uint64_t hash = compute_hash(svg_xml_or_path);
-    uint32_t col_rgba = pack_color(tint);
+    uint32_t col_rgba = hash_theme(theme);
 
     SvgCacheKey key{
         .hash = hash,
@@ -88,7 +118,7 @@ const BakedSvg& SvgCache::get_or_bake(
         return empty_fallback_;
     }
 
-    BakedSvg baked = BakedSvg::bake(*doc, width, height, tint);
+    BakedSvg baked = BakedSvg::bake(*doc, width, height, theme);
     if (!baked.is_valid()) {
         return empty_fallback_;
     }
@@ -117,16 +147,37 @@ const BakedSvg& SvgCache::get_or_bake(
 
 const BakedSvg& SvgCache::get_or_bake(
     const SvgDocument& doc,
+    uint32_t width,
+    uint32_t height,
+    const SvgTheme& theme
+) {
+    return get_or_bake(doc, reinterpret_cast<uintptr_t>(&doc), width, height, theme);
+}
+
+const BakedSvg& SvgCache::get_or_bake(
+    const SvgDocument& doc,
     uint64_t doc_id,
     uint32_t width,
     uint32_t height,
     std::optional<Color> tint
 ) {
+    SvgTheme theme;
+    theme.tint_color = tint;
+    return get_or_bake(doc, doc_id, width, height, theme);
+}
+
+const BakedSvg& SvgCache::get_or_bake(
+    const SvgDocument& doc,
+    uint64_t doc_id,
+    uint32_t width,
+    uint32_t height,
+    const SvgTheme& theme
+) {
     if (width == 0 || height == 0) {
         return empty_fallback_;
     }
 
-    uint32_t col_rgba = pack_color(tint);
+    uint32_t col_rgba = hash_theme(theme);
 
     SvgCacheKey key{
         .hash = doc_id,
@@ -144,7 +195,7 @@ const BakedSvg& SvgCache::get_or_bake(
 
     // Cache Miss: Bake
     ++misses_;
-    BakedSvg baked = BakedSvg::bake(doc, width, height, tint);
+    BakedSvg baked = BakedSvg::bake(doc, width, height, theme);
     if (!baked.is_valid()) {
         return empty_fallback_;
     }
@@ -168,9 +219,21 @@ void SvgCache::draw(
     float opacity,
     std::optional<Color> tint
 ) {
+    SvgTheme theme;
+    theme.tint_color = tint;
+    draw(canvas, svg_xml_or_path, dest_bounds, theme, opacity);
+}
+
+void SvgCache::draw(
+    Canvas& canvas,
+    std::string_view svg_xml_or_path,
+    const Rect& dest_bounds,
+    const SvgTheme& theme,
+    float opacity
+) {
     uint32_t w = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.width())));
     uint32_t h = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.height())));
-    const auto& baked = get_or_bake(svg_xml_or_path, w, h, tint);
+    const auto& baked = get_or_bake(svg_xml_or_path, w, h, theme);
     if (baked.is_valid()) {
         baked.draw(canvas, dest_bounds, opacity);
     }
@@ -202,6 +265,21 @@ void SvgCache::draw(
 void SvgCache::draw(
     Canvas& canvas,
     const SvgDocument& doc,
+    const Rect& dest_bounds,
+    const SvgTheme& theme,
+    float opacity
+) {
+    uint32_t w = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.width())));
+    uint32_t h = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.height())));
+    const auto& baked = get_or_bake(doc, reinterpret_cast<uintptr_t>(&doc), w, h, theme);
+    if (baked.is_valid()) {
+        baked.draw(canvas, dest_bounds, opacity);
+    }
+}
+
+void SvgCache::draw(
+    Canvas& canvas,
+    const SvgDocument& doc,
     float x, float y, float width, float height,
     float opacity,
     std::optional<Color> tint
@@ -228,7 +306,7 @@ void SvgCache::draw(
     }
 }
 
-#ifdef NISABA_HAS_GPU
+#if defined(NISABA_HAS_GPU) || defined(NISABA_GLEW)
 void SvgCache::draw(
     gpu::GpuCanvas& canvas,
     std::string_view svg_xml_or_path,
@@ -236,9 +314,21 @@ void SvgCache::draw(
     float opacity,
     std::optional<Color> tint
 ) {
+    SvgTheme theme;
+    theme.tint_color = tint;
+    draw(canvas, svg_xml_or_path, dest_bounds, theme, opacity);
+}
+
+void SvgCache::draw(
+    gpu::GpuCanvas& canvas,
+    std::string_view svg_xml_or_path,
+    const Rect& dest_bounds,
+    const SvgTheme& theme,
+    float opacity
+) {
     uint32_t w = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.width())));
     uint32_t h = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.height())));
-    const auto& baked = get_or_bake(svg_xml_or_path, w, h, tint);
+    const auto& baked = get_or_bake(svg_xml_or_path, w, h, theme);
     if (baked.is_valid()) {
         PixmapPaint paint;
         paint.opacity = opacity;
@@ -272,6 +362,28 @@ void SvgCache::draw(
     std::optional<Color> tint
 ) {
     draw(canvas, doc, reinterpret_cast<uintptr_t>(&doc), dest_bounds, opacity, tint);
+}
+
+void SvgCache::draw(
+    gpu::GpuCanvas& canvas,
+    const SvgDocument& doc,
+    const Rect& dest_bounds,
+    const SvgTheme& theme,
+    float opacity
+) {
+    uint32_t w = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.width())));
+    uint32_t h = static_cast<uint32_t>(std::max(1.0f, std::round(dest_bounds.height())));
+    const auto& baked = get_or_bake(doc, reinterpret_cast<uintptr_t>(&doc), w, h, theme);
+    if (baked.is_valid()) {
+        PixmapPaint paint;
+        paint.opacity = opacity;
+        canvas.draw_pixmap(
+            static_cast<int32_t>(std::round(dest_bounds.left())),
+            static_cast<int32_t>(std::round(dest_bounds.top())),
+            baked.pixmap().as_ref(),
+            paint
+        );
+    }
 }
 
 void SvgCache::draw(

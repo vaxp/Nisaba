@@ -53,12 +53,28 @@ public:
         std::optional<Color> tint = std::nullopt
     );
 
+    /// @brief Retrieve or bake an SVG from a raw XML string or file path with full SvgTheme.
+    const BakedSvg& get_or_bake(
+        std::string_view svg_xml_or_path,
+        uint32_t width,
+        uint32_t height,
+        const SvgTheme& theme
+    );
+
     /// @brief Retrieve or bake a pre-parsed SvgDocument using its memory address as identifier.
     const BakedSvg& get_or_bake(
         const SvgDocument& doc,
         uint32_t width,
         uint32_t height,
         std::optional<Color> tint = std::nullopt
+    );
+
+    /// @brief Retrieve or bake a pre-parsed SvgDocument with full SvgTheme.
+    const BakedSvg& get_or_bake(
+        const SvgDocument& doc,
+        uint32_t width,
+        uint32_t height,
+        const SvgTheme& theme
     );
 
     /// @brief Retrieve or bake a pre-parsed SvgDocument using a unique document identifier.
@@ -70,6 +86,15 @@ public:
         std::optional<Color> tint = std::nullopt
     );
 
+    /// @brief Retrieve or bake a pre-parsed SvgDocument using a unique document identifier and SvgTheme.
+    const BakedSvg& get_or_bake(
+        const SvgDocument& doc,
+        uint64_t doc_id,
+        uint32_t width,
+        uint32_t height,
+        const SvgTheme& theme
+    );
+
     /// @brief Draw cached SVG to a software CPU Canvas with O(1) SIMD blit.
     void draw(
         Canvas& canvas,
@@ -77,6 +102,15 @@ public:
         const Rect& dest_bounds,
         float opacity = 1.0f,
         std::optional<Color> tint = std::nullopt
+    );
+
+    /// @brief Draw cached SVG to a software CPU Canvas with full SvgTheme.
+    void draw(
+        Canvas& canvas,
+        std::string_view svg_xml_or_path,
+        const Rect& dest_bounds,
+        const SvgTheme& theme,
+        float opacity = 1.0f
     );
 
     /// @brief Draw cached SVG using explicit coordinates.
@@ -95,6 +129,15 @@ public:
         const Rect& dest_bounds,
         float opacity = 1.0f,
         std::optional<Color> tint = std::nullopt
+    );
+
+    /// @brief Draw pre-parsed cached SVG to a software CPU Canvas with full SvgTheme.
+    void draw(
+        Canvas& canvas,
+        const SvgDocument& doc,
+        const Rect& dest_bounds,
+        const SvgTheme& theme,
+        float opacity = 1.0f
     );
 
     /// @brief Draw pre-parsed cached SVG using explicit coordinates.
@@ -116,7 +159,7 @@ public:
         std::optional<Color> tint = std::nullopt
     );
 
-#ifdef NISABA_HAS_GPU
+#if defined(NISABA_HAS_GPU) || defined(NISABA_GLEW)
     /// @brief Draw cached SVG to a GpuCanvas via texture/pixmap pattern.
     void draw(
         gpu::GpuCanvas& canvas,
@@ -124,6 +167,15 @@ public:
         const Rect& dest_bounds,
         float opacity = 1.0f,
         std::optional<Color> tint = std::nullopt
+    );
+
+    /// @brief Draw cached SVG to a GpuCanvas with full SvgTheme.
+    void draw(
+        gpu::GpuCanvas& canvas,
+        std::string_view svg_xml_or_path,
+        const Rect& dest_bounds,
+        const SvgTheme& theme,
+        float opacity = 1.0f
     );
 
     /// @brief Draw cached SVG to a GpuCanvas using explicit coordinates.
@@ -142,6 +194,15 @@ public:
         const Rect& dest_bounds,
         float opacity = 1.0f,
         std::optional<Color> tint = std::nullopt
+    );
+
+    /// @brief Draw pre-parsed cached SVG to a GpuCanvas with full SvgTheme.
+    void draw(
+        gpu::GpuCanvas& canvas,
+        const SvgDocument& doc,
+        const Rect& dest_bounds,
+        const SvgTheme& theme,
+        float opacity = 1.0f
     );
 
     /// @brief Draw pre-parsed cached SVG to a GpuCanvas using explicit coordinates.
@@ -182,6 +243,7 @@ public:
     /// @brief Fast 64-bit FNV-1a hash utility
     static uint64_t compute_hash(std::string_view s) noexcept;
     static uint32_t pack_color(std::optional<Color> c) noexcept;
+    static uint32_t hash_theme(const SvgTheme& theme) noexcept;
 
 private:
     size_t max_entries_{128};

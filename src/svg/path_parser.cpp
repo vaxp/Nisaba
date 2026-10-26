@@ -1,9 +1,8 @@
 #include "nisaba/svg/path_parser.hpp"
-#include <string>
 #include <cmath>
-#include <cstdlib>
 #include <cctype>
 #include <algorithm>
+#include <charconv>
 
 namespace nisaba::svg {
 
@@ -14,7 +13,7 @@ constexpr float TWO_PI = 2.0f * PI;
 
 class PathLexer {
 public:
-    explicit PathLexer(std::string_view str) : str_(str), pos_(0) {}
+    explicit PathLexer(std::string_view str) noexcept : str_(str), pos_(0) {}
 
     bool has_more() noexcept {
         skip_spaces_and_commas();
@@ -52,50 +51,92 @@ public:
         return '\0';
     }
 
+    /// Zero-allocation floating-point lexer supporting minified SVG paths (e.g. ".5.5", "10-20", "1e-4.3").
     bool next_number(float& out) noexcept {
         skip_spaces_and_commas();
         if (pos_ >= str_.size()) return false;
 
         size_t start = pos_;
+        bool neg = false;
         if (str_[pos_] == '+' || str_[pos_] == '-') {
+            neg = (str_[pos_] == '-');
             pos_++;
         }
+
+        uint64_t int_part = 0;
         bool has_digits = false;
+        int int_digits = 0;
         while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
             has_digits = true;
+            if (int_digits < 18) {
+                int_part = int_part * 10 + static_cast<uint64_t>(str_[pos_] - '0');
+                int_digits++;
+            } else {
+                int_digits++;
+            }
             pos_++;
         }
+
+        uint64_t frac_part = 0;
+        int frac_digits = 0;
         if (pos_ < str_.size() && str_[pos_] == '.') {
             pos_++;
             while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
                 has_digits = true;
+                if (frac_digits < 18) {
+                    frac_part = frac_part * 10 + static_cast<uint64_t>(str_[pos_] - '0');
+                    frac_digits++;
+                }
                 pos_++;
             }
         }
+
         if (!has_digits) {
             pos_ = start;
             return false;
         }
+
+        int exp_val = 0;
+        bool exp_neg = false;
         if (pos_ < str_.size() && (str_[pos_] == 'e' || str_[pos_] == 'E')) {
             size_t exp_start = pos_;
             pos_++;
             if (pos_ < str_.size() && (str_[pos_] == '+' || str_[pos_] == '-')) {
+                exp_neg = (str_[pos_] == '-');
                 pos_++;
             }
             bool exp_digits = false;
             while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
                 exp_digits = true;
+                if (exp_val < 1000) {
+                    exp_val = exp_val * 10 + (str_[pos_] - '0');
+                }
                 pos_++;
             }
             if (!exp_digits) {
                 pos_ = exp_start;
+                exp_val = 0;
+                exp_neg = false;
             }
         }
 
-        std::string_view num_str = str_.substr(start, pos_ - start);
-        std::string s(num_str);
-        char* end = nullptr;
-        out = std::strtof(s.c_str(), &end);
+        double val = static_cast<double>(int_part);
+        if (int_digits > 18) {
+            val *= std::pow(10.0, int_digits - 18);
+        }
+        if (frac_digits > 0) {
+            static constexpr double pow10_inv[] = {
+                1.0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9,
+                1e-10, 1e-11, 1e-12, 1e-13, 1e-14, 1e-15, 1e-16, 1e-17, 1e-18
+            };
+            val += static_cast<double>(frac_part) * pow10_inv[frac_digits];
+        }
+        if (exp_val != 0) {
+            val *= std::pow(10.0, exp_neg ? -exp_val : exp_val);
+        }
+        if (neg) val = -val;
+
+        out = static_cast<float>(val);
         return true;
     }
 
