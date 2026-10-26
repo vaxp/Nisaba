@@ -24,24 +24,37 @@ enum class CharType : uint8_t {
     Neutral
 };
 
+/// Contextual joining form for Arabic/cursive scripts.
+enum class ArabicForm : uint8_t {
+    None = 0,
+    Isolated = 1,
+    Initial = 2,
+    Medial = 3,
+    Final = 4
+};
+
 /// Represents a contiguous directional run within text.
 struct BidiRun {
     size_t start_byte{0};
     size_t end_byte{0};
-    uint8_t level{0}; // 0 = LTR, 1 = RTL
+    uint8_t level{0}; // Even = LTR, Odd = RTL
 
     bool is_rtl() const noexcept { return (level % 2) != 0; }
 };
 
-/// Shaped glyph or codepoint item with positioning context.
+/// Shaped glyph or codepoint item with positioning and joining context.
 struct ShapedChar {
     char32_t codepoint{0};
     size_t byte_index{0};
     uint8_t level{0};
     bool is_rtl{false};
+    bool is_mark{false};
+    ArabicForm arabic_form{ArabicForm::None};
+    char32_t original_codepoint{0};
 };
 
-/// Utilities for UTF-8 decoding, Unicode Bidirectional Analysis, and Arabic Shaping.
+/// Utilities for UTF-8 decoding, Unicode Bidirectional Analysis (UAX #9),
+/// Arabic/Persian/Urdu Contextual Shaping, and Grapheme Cluster Segmentation (UAX #29).
 class Bidi {
 public:
     /// Decodes a UTF-8 string into 32-bit Unicode codepoints with byte offsets.
@@ -50,11 +63,17 @@ public:
     /// Determines character directional classification.
     static CharType classify_char(char32_t c) noexcept;
 
-    /// Checks if a codepoint belongs to the Arabic script block.
+    /// Checks if a codepoint belongs to the Arabic/Persian/Urdu script blocks.
     static bool is_arabic(char32_t c) noexcept;
 
     /// Checks if a codepoint is an Arabic diacritic (Tashkeel / Harakah).
     static bool is_arabic_diacritic(char32_t c) noexcept;
+
+    /// Checks if a codepoint is any Unicode combining mark or zero-width grapheme extender.
+    static bool is_combining_mark(char32_t c) noexcept;
+
+    /// Returns the mirrored counterpart of a bracket/symbol in RTL context (UAX #9 Bidi_Mirrored).
+    static char32_t mirror_char(char32_t c) noexcept;
 
     /// Checks if a codepoint is CJK (Chinese, Japanese, Korean) ideograph or syllabary.
     static bool is_cjk(char32_t c) noexcept;
@@ -71,9 +90,21 @@ public:
     /// Segments text into directional runs according to Unicode BiDi algorithm principles.
     static std::vector<BidiRun> segment_runs(std::string_view text, std::optional<Direction> base_dir = std::nullopt);
 
-    /// Shapes Arabic text, performing contextual joining (Isolated, Initial, Medial, Final)
-    /// and mandatory ligatures (e.g. Lam-Alif).
+    /// Shapes Arabic/Persian/Urdu text, performing contextual joining (Isolated, Initial, Medial, Final),
+    /// mandatory ligatures (e.g. Lam-Alif), Bidi bracket mirroring, and mark clustering.
     static std::vector<ShapedChar> shape_text(std::string_view text, const std::vector<BidiRun>& runs);
+
+    /// Advances to the next Unicode Grapheme Cluster boundary (UAX #29).
+    static size_t next_grapheme_cluster(std::string_view text, size_t byte_index) noexcept;
+
+    /// Moves back to the previous Unicode Grapheme Cluster boundary (UAX #29).
+    static size_t prev_grapheme_cluster(std::string_view text, size_t byte_index) noexcept;
+
+    /// Advances to the next word boundary.
+    static size_t next_word_boundary(std::string_view text, size_t byte_index) noexcept;
+
+    /// Moves back to the previous word boundary.
+    static size_t prev_word_boundary(std::string_view text, size_t byte_index) noexcept;
 };
 
 } // namespace nisaba::text

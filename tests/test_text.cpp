@@ -322,6 +322,166 @@ void test_multilingual_cjk_russian() {
     std::cout << "  -> PASS" << std::endl;
 }
 
+void test_extended_arabic_tashkeel_and_mirroring() {
+    std::cout << "[Test] Extended Arabic/Persian/Urdu, Tashkeel Diacritics & RTL Mirroring..." << std::endl;
+
+    // 1. RTL Bracket Mirroring
+    assert(Bidi::mirror_char('(') == ')');
+    assert(Bidi::mirror_char(')') == '(');
+    assert(Bidi::mirror_char('[') == ']');
+    assert(Bidi::mirror_char(0x00AB) == 0x00BB); // « -> »
+
+    std::string rtl_parens = "(مرحبا)";
+    auto shaped_parens = Bidi::shape_text(rtl_parens, Bidi::segment_runs(rtl_parens));
+    assert(!shaped_parens.empty());
+    // In visual order (left-to-right), the closing parenthesis of RTL '(مرحبا)' is at index 0 and mirrored to '('
+    assert(shaped_parens.front().codepoint == '(');
+    assert(shaped_parens.back().codepoint == ')');
+
+    // 2. Persian / Urdu extended letters (پ چ گ ک ی)
+    std::string persian = "پژوهشگر";
+    auto shaped_persian = Bidi::shape_text(persian, Bidi::segment_runs(persian));
+    assert(shaped_persian.size() == 7);
+    // Verify Pe (0x067E) at initial position shaped to 0xFB58
+    bool found_shaped_pe = false;
+    for (const auto& sc : shaped_persian) {
+        if (sc.original_codepoint == 0x067E && sc.codepoint == 0xFB58) {
+            found_shaped_pe = true;
+        }
+    }
+    assert(found_shaped_pe);
+
+    // 3. Arabic with Tashkeel (Harakat) - marks must not break contextual joining!
+    std::string vocalized = "سَلَامٌ"; // Sin + Fatha + Lam + Fatha + Alif + Mim + Dammatan
+    auto shaped_voc = Bidi::shape_text(vocalized, Bidi::segment_runs(vocalized));
+    bool found_lam_alif_with_tashkeel = false;
+    size_t mark_count = 0;
+    for (const auto& sc : shaped_voc) {
+        if (sc.codepoint == 0xFEFB || sc.codepoint == 0xFEFC) {
+            found_lam_alif_with_tashkeel = true;
+        }
+        if (sc.is_mark) {
+            mark_count++;
+        }
+    }
+    assert(found_lam_alif_with_tashkeel);
+    assert(mark_count == 3);
+
+    std::cout << "  Persian/Urdu joining, RTL bracket mirroring, and Tashkeel-preserving Lam-Alif verified." << std::endl;
+    std::cout << "  -> PASS" << std::endl;
+}
+
+void test_rich_typography_and_layout() {
+    std::cout << "[Test] Rich Typography (Justify, Ellipsis, Spans, Synthetic Bold/Italic, Decorations)..." << std::endl;
+
+    FontSystem fs;
+    auto fid = fs.load_font_file(resolve_font("Inter-Regular.ttf"));
+    assert(fid.has_value());
+    const TtfFont* font = fs.get_font(*fid);
+    assert(font != nullptr);
+
+    // 1. Synthetic Bold & Italic outlines
+    uint16_t gid_H = font->glyph_index('H');
+    Path normal_path, bold_path, italic_path;
+    assert(font->get_glyph_path_styled(gid_H, normal_path, 32.0f, false, false));
+    assert(font->get_glyph_path_styled(gid_H, bold_path, 32.0f, true, false));
+    assert(font->get_glyph_path_styled(gid_H, italic_path, 32.0f, false, true));
+    assert(bold_path.bounds().width() > normal_path.bounds().width());
+    assert(italic_path.bounds().width() > normal_path.bounds().width());
+
+    // 2. Full Justification (Align::Justified)
+    Buffer just_buf(Metrics(16.0f, 22.0f));
+    just_buf.set_size(220.0f, std::nullopt);
+    just_buf.set_wrap(Wrap::Word);
+    just_buf.set_align(Align::Justified);
+    just_buf.set_text(
+        "Nisaba engine supports full text justification across wrapped paragraph lines with ease."
+    );
+    just_buf.shape_until_scroll(fs);
+    auto just_runs = just_buf.layout_runs();
+    assert(just_runs.size() >= 2);
+    // First wrapped line should be stretched close to 220px
+    assert(just_runs[0].line_width > 200.0f);
+
+    // 3. Overflow::Ellipsis + max_lines
+    Buffer ell_buf(Metrics(16.0f, 22.0f));
+    ell_buf.set_size(140.0f, std::nullopt);
+    ell_buf.set_wrap(Wrap::Word);
+    ell_buf.set_overflow(Overflow::Ellipsis);
+    ell_buf.set_max_lines(1);
+    ell_buf.set_text("This is a very long sentence that should be truncated with an ellipsis");
+    ell_buf.shape_until_scroll(fs);
+    auto ell_runs = ell_buf.layout_runs();
+    assert(ell_runs.size() == 1);
+    assert(!ell_runs[0].glyphs.empty());
+
+    // 4. Rich inline spans (font_size, letter_spacing, underline, strikethrough, background)
+    Attrs base_attrs;
+    AttrsList rich_list(base_attrs);
+    Attrs span1;
+    span1.set_font_size(24.0f)
+         .set_letter_spacing(2.0f)
+         .set_underline(true)
+         .set_strikethrough(true)
+         .set_background_color(TextColor::rgb(60, 80, 120))
+         .set_weight(Weight::Bold)
+         .set_style(Style::Italic);
+    rich_list.add_span(0, 6, span1);
+
+    Buffer rich_buf(Metrics(16.0f, 26.0f));
+    rich_buf.set_text("Nisaba Rich Typography", base_attrs);
+    rich_buf.lines_mut()[0].attrs_list_mut() = rich_list;
+    rich_buf.shape_until_scroll(fs);
+
+    auto pixmap = Pixmap::allocate(400, 80);
+    assert(pixmap.has_value());
+    Canvas canvas(*pixmap);
+    canvas.clear(Color::BLACK);
+    GlyphCache cache(128);
+    rich_buf.draw(canvas, cache, fs, Color::WHITE, 10.0f, 10.0f);
+    assert(cache.size() > 0);
+
+    std::cout << "  -> PASS" << std::endl;
+}
+
+void test_grapheme_word_cursor_and_selection_rects() {
+    std::cout << "[Test] Grapheme Cluster Cursor, Word Motions & Selection Rects..." << std::endl;
+
+    FontSystem fs;
+    fs.load_font_file(resolve_font("Inter-Regular.ttf"));
+
+    // 1. Grapheme cluster navigation over combining mark ('e' + U+0301 combining acute accent)
+    std::string combining_text = "e\xCC\x81x"; // 'e' (1 byte) + U+0301 (2 bytes) + 'x' (1 byte) = 4 bytes
+    assert(Bidi::next_grapheme_cluster(combining_text, 0) == 3);
+    assert(Bidi::prev_grapheme_cluster(combining_text, 3) == 0);
+
+    // 2. Word navigation & selection geometry
+    Buffer buf(Metrics(16.0f, 22.0f));
+    buf.set_text("Hello Sovereign World");
+    buf.shape_until_scroll(fs);
+
+    Cursor c0{0, 0};
+    Cursor c_word1 = CursorController::move(buf, c0, Motion::WordRight);
+    assert(c_word1.index == 5); // End of "Hello"
+
+    Cursor c_word2 = CursorController::move(buf, c_word1, Motion::WordRight);
+    assert(c_word2.index == 15); // End of "Sovereign"
+
+    Cursor c_back = CursorController::move(buf, c_word2, Motion::WordLeft);
+    assert(c_back.index == 6); // Start of "Sovereign"
+
+    Rect caret = CursorController::cursor_rect(buf, c_word1);
+    assert(caret.x() > 0.0f);
+    assert(caret.height() == 22.0f);
+
+    Selection sel(c0, c_word1);
+    auto rects = CursorController::selection_rects(buf, sel);
+    assert(rects.size() == 1);
+    assert(rects[0].width() > 10.0f);
+
+    std::cout << "  -> PASS" << std::endl;
+}
+
 int main() {
     std::cout << "==========================================" << std::endl;
     std::cout << "   Nisaba Sovereign Text Engine Test Suite" << std::endl;
@@ -335,9 +495,12 @@ int main() {
     test_rendering_to_canvas();
     test_cursor_and_selection();
     test_multilingual_cjk_russian();
+    test_extended_arabic_tashkeel_and_mirroring();
+    test_rich_typography_and_layout();
+    test_grapheme_word_cursor_and_selection_rects();
 
     std::cout << "==========================================" << std::endl;
-    std::cout << "All 8 text test suites passed successfully!" << std::endl;
+    std::cout << "All 11 text test suites passed successfully!" << std::endl;
     std::cout << "==========================================" << std::endl;
     return 0;
 }

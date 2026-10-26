@@ -17,6 +17,21 @@
 
 namespace nisaba::text {
 
+/// Represents a single colored vector layer in an OpenType COLR/CPAL color glyph.
+struct ColorGlyphLayer {
+    uint16_t glyph_id{0};
+    TextColor color{255, 255, 255, 255};
+    bool use_foreground{false}; /// True if palette index is 0xFFFF (use current text color)
+};
+
+/// Represents a design variation axis from the OpenType 'fvar' table.
+struct VariationAxis {
+    uint32_t tag{0};
+    float min_value{0.0f};
+    float default_value{0.0f};
+    float max_value{0.0f};
+};
+
 /// Sovereign binary TrueType / OpenType font reader.
 /// Completely independent with zero external dependencies.
 class TtfFont {
@@ -74,6 +89,9 @@ public:
         }
         return lookup_glyph_raw(codepoint);
     }
+
+    /// Maps a Unicode codepoint and Variation Selector (cmap Format 14) to a glyph index.
+    uint16_t glyph_index_variation(char32_t codepoint, char32_t variation_selector) const noexcept;
 
     /// Fast O(1) ASCII glyph index lookup
     inline uint16_t ascii_glyph_index(uint8_t c) const noexcept {
@@ -137,12 +155,26 @@ public:
     }
 
     /// Retrieves kerning between two glyphs in font design units.
-    /// Checks OpenType GPOS PairPos first, then falls back to legacy 'kern' table.
-    int16_t get_kerning(uint16_t left_glyph, uint16_t right_glyph) const noexcept;
+    /// Checks O(1) direct-mapped cache first, then OpenType GPOS PairPos and legacy 'kern' table.
+    inline int16_t get_kerning(uint16_t left_glyph, uint16_t right_glyph) const noexcept {
+        if (!has_kerning_) [[unlikely]] return 0;
+        uint32_t key = (static_cast<uint32_t>(left_glyph) << 16) | static_cast<uint32_t>(right_glyph);
+        if (!kern_fast_cache_.empty()) [[likely]] {
+            size_t slot_idx = ((key * 2654435761u) >> 21) & (KERN_CACHE_SIZE - 1);
+            const auto& slot = kern_fast_cache_[slot_idx];
+            if (slot.key == key) [[likely]] {
+                return slot.value;
+            }
+        }
+        return compute_kerning_slow(left_glyph, right_glyph);
+    }
+
+    [[nodiscard]] bool has_kerning() const noexcept { return has_kerning_; }
 
     // --- OpenType & PostScript Features ---
     [[nodiscard]] bool is_cff() const noexcept { return is_cff_; }
     [[nodiscard]] const CffFont* cff() const noexcept { return cff_.get(); }
+    [[nodiscard]] const OpenTypeGdef* gdef() const noexcept { return gdef_.get(); }
     [[nodiscard]] const OpenTypeGsub* gsub() const noexcept { return gsub_.get(); }
     [[nodiscard]] const OpenTypeGpos* gpos() const noexcept { return gpos_.get(); }
 
@@ -152,17 +184,39 @@ public:
     /// Applies specific OpenType GSUB features.
     bool apply_gsub(std::vector<uint16_t>& glyphs, std::span<const uint32_t> feature_tags) const;
 
+    // --- Color Glyphs (COLR / CPAL) & Variable Axes (fvar) ---
+    [[nodiscard]] bool has_color_glyphs() const noexcept { return colr_offset_ != 0 && cpal_offset_ != 0; }
+    bool get_color_glyph_layers(
+        uint16_t glyph_id,
+        std::vector<ColorGlyphLayer>& out_layers,
+        uint16_t palette_index = 0
+    ) const;
+
+    [[nodiscard]] std::span<const VariationAxis> variation_axes() const noexcept { return variation_axes_; }
+
     // --- Vector Outline Extraction ---
     /// Extracts the vector outline for a glyph, scaled to the requested font pixel size.
     /// Supports both TrueType quadratic outlines ('glyf') and CFF / CFF2 PostScript cubic outlines ('CFF ').
     /// Y coordinates are flipped to match screen space (downwards positive).
     bool get_glyph_path(uint16_t glyph_id, Path& out_path, float font_size) const;
 
+    /// Extracts the vector outline for a glyph with optional synthetic bold and synthetic italic styling.
+    bool get_glyph_path_styled(
+        uint16_t glyph_id,
+        Path& out_path,
+        float font_size,
+        bool synthetic_bold = false,
+        bool synthetic_italic = false
+    ) const;
+
 private:
     struct TableRecord {
+        uint32_t tag{0};
         uint32_t offset{0};
         uint32_t length{0};
     };
+
+    const TableRecord* find_table(uint32_t tag) const noexcept;
 
     bool parse_internal(std::span<const uint8_t> data);
     bool parse_head();
@@ -173,17 +227,22 @@ private:
     bool parse_name();
     bool parse_kern();
     bool parse_os2();
+    bool parse_fvar();
 
     bool extract_simple_glyph(const uint8_t* g_data, Path& path, float scale) const;
     bool extract_composite_glyph(const uint8_t* g_data, Path& path, float scale, int recursion_depth) const;
 
     uint16_t lookup_glyph_raw(char32_t codepoint) const noexcept;
+    int16_t compute_kerning_slow(uint16_t left_glyph, uint16_t right_glyph) const noexcept;
 
     std::vector<uint8_t> owned_data_{};
     std::span<const uint8_t> data_{};
     bool is_valid_{false};
 
-    std::unordered_map<uint32_t, TableRecord> tables_{};
+    // Flat zero-allocation table directory (up to 48 SFNT tables)
+    static constexpr size_t MAX_SFNT_TABLES = 48;
+    TableRecord tables_[MAX_SFNT_TABLES]{};
+    uint16_t num_tables_{0};
 
     std::string family_name_{"Unknown"};
     std::string style_name_{"Regular"};
@@ -206,10 +265,16 @@ private:
     uint32_t hmtx_offset_{0};
     const uint8_t* hmtx_table_{nullptr};
     uint32_t kern_offset_{0};
+    uint32_t colr_offset_{0};
+    uint32_t colr_length_{0};
+    uint32_t cpal_offset_{0};
+    uint32_t cpal_length_{0};
 
     // Cmap subtable info & pre-cached offsets
     uint32_t cmap_format4_offset_{0};
     uint32_t cmap_format12_offset_{0};
+    uint32_t cmap_format14_offset_{0};
+    uint32_t cmap_format14_length_{0};
     const uint8_t* cmap_format12_groups_{nullptr};
     uint32_t cmap_format12_num_groups_{0};
     const uint8_t* cmap_format4_end_codes_{nullptr};
@@ -225,8 +290,21 @@ private:
     uint16_t ascii_lut_[128]{0};
     int16_t ascii_adv_lut_[128]{0};
 
-    // Kerning map (fast lookup: (left << 16 | right) -> kern_value)
-    std::unordered_map<uint32_t, int16_t> kerning_pairs_{};
+    // Sorted legacy 'kern' table pairs: (left << 16 | right) -> kern_value
+    struct KernPair {
+        uint32_t key{0};
+        int16_t value{0};
+    };
+    std::vector<KernPair> kerning_pairs_{};
+    bool has_kerning_{false};
+
+    // Fast O(1) direct-mapped kerning cache (lazily allocated on first get_kerning query)
+    static constexpr size_t KERN_CACHE_SIZE = 2048;
+    struct KernCacheSlot {
+        uint32_t key{0xFFFFFFFFu};
+        int16_t value{0};
+    };
+    mutable std::vector<KernCacheSlot> kern_fast_cache_{};
 
     // Fast O(1) unscaled glyph outline path cache
     struct CachedPathEntry {
@@ -242,13 +320,15 @@ private:
         }
     };
     mutable std::vector<CachedPathEntry> glyph_path_cache_{};
-    mutable std::unique_ptr<std::recursive_mutex> cache_mutex_{std::make_unique<std::recursive_mutex>()};
+    mutable std::unique_ptr<std::recursive_mutex> cache_mutex_{nullptr};
 
     // OpenType & CFF extensions
     bool is_cff_{false};
     std::unique_ptr<CffFont> cff_{nullptr};
+    std::unique_ptr<OpenTypeGdef> gdef_{nullptr};
     std::unique_ptr<OpenTypeGsub> gsub_{nullptr};
     std::unique_ptr<OpenTypeGpos> gpos_{nullptr};
+    std::vector<VariationAxis> variation_axes_{};
 };
 
 /// Standard font alias for TtfFont in Nisaba typography subsystem.

@@ -1,17 +1,18 @@
 #pragma once
 
 /// @file json.hpp
-/// @brief Sovereign, zero-dependency RFC 8259 JSON parser and DOM representation in C++20.
+/// @brief Sovereign, zero-dependency, cache-contiguous RFC 8259 JSON parser and DOM in C++20.
 /// Part of the Nisaba Graphics & Animation Engine.
 
 #include <string>
 #include <string_view>
 #include <vector>
-#include <map>
+#include <utility>
 #include <variant>
 #include <optional>
 #include <memory>
 #include <cstdint>
+#include <algorithm>
 
 namespace nisaba::json {
 
@@ -26,7 +27,7 @@ enum class JsonType : uint8_t {
 
 class JsonValue;
 using JsonArray = std::vector<JsonValue>;
-using JsonObject = std::map<std::string, JsonValue, std::less<>>;
+using JsonObject = std::vector<std::pair<std::string, JsonValue>>;
 
 class JsonValue {
 public:
@@ -36,7 +37,7 @@ public:
         double,         // Number
         std::string,    // String
         JsonArray,      // Array
-        JsonObject      // Object
+        JsonObject      // Object (flat cache-contiguous key-value vector)
     >;
 
     JsonValue() noexcept : data_(std::monostate{}) {}
@@ -129,18 +130,16 @@ public:
         return std::get<JsonObject>(data_);
     }
 
-    // Object lookup helpers
+    // Object lookup helpers (cache-contiguous linear scan for small objects, fast key match)
     [[nodiscard]] bool has(std::string_view key) const noexcept {
-        if (auto* obj = std::get_if<JsonObject>(&data_)) {
-            return obj->find(key) != obj->end();
-        }
-        return false;
+        return get(key) != nullptr;
     }
 
     [[nodiscard]] const JsonValue* get(std::string_view key) const noexcept {
         if (auto* obj = std::get_if<JsonObject>(&data_)) {
-            auto it = obj->find(key);
-            if (it != obj->end()) return &(it->second);
+            for (const auto& kv : *obj) {
+                if (kv.first == key) return &kv.second;
+            }
         }
         return nullptr;
     }

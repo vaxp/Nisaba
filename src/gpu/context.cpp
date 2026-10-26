@@ -2503,7 +2503,8 @@ void Context::drawTextBuffer(const text::Buffer& buffer, text::FontSystem& fontS
 	};
 
 	for (const auto& run : runs) {
-		float line_baseline = pos.y + run.line_top + buffer.metrics().font_size;
+		float baseline_offset = (run.max_ascent > 0.0f) ? run.max_ascent : buffer.metrics().font_size;
+		float line_baseline = pos.y + run.line_top + baseline_offset;
 
 		for (const auto& glyph : run.glyphs) {
 			if (glyph.glyph_id == 0) continue;
@@ -2529,12 +2530,14 @@ void Context::drawTextBuffer(const text::Buffer& buffer, text::FontSystem& fontS
 			auto [intX, xBin] = text::compute_subpixel_bin(targetX);
 			auto [intY, yBin] = text::compute_subpixel_bin(targetY);
 
-			text::CacheKey key{glyph.font_id, glyph.glyph_id, sizeBits, xBin, yBin};
+			uint8_t styleFlags = (glyph.synthetic_bold ? 1 : 0) | (glyph.synthetic_italic ? 2 : 0);
+			text::CacheKey key{glyph.font_id, glyph.glyph_id, sizeBits, xBin, yBin, styleFlags};
 			const AtlasGlyphEntry* entry = m_atlas->find(key);
 
 			if (!entry) {
 				const text::CachedGlyph* cg = m_glyphCache.get_or_render(
-					*font, glyph.font_id, glyph.glyph_id, scaledSize, targetX, targetY);
+					*font, glyph.font_id, glyph.glyph_id, scaledSize, targetX, targetY,
+					glyph.synthetic_bold, glyph.synthetic_italic);
 
 				auto inserted = m_atlas->insert(key, cg);
 				if (!inserted) {

@@ -31,27 +31,46 @@ BakedText BakedText::from_buffer(
     float font_size = buffer.metrics().font_size;
 
     for (const auto& run : runs) {
-        float line_baseline = run.line_top + font_size;
+        float baseline_offset = (run.max_ascent > 0.0f) ? run.max_ascent : font_size;
+        float line_baseline = run.line_top + baseline_offset;
 
         for (const auto& glyph : run.glyphs) {
+            if (glyph.background_color_opt.has_value() && !glyph.is_mark && glyph.w > 0.0f) {
+                min_x = std::min(min_x, glyph.x);
+                min_y = std::min(min_y, run.line_top);
+                max_x = std::max(max_x, glyph.x + glyph.w);
+                max_y = std::max(max_y, run.line_top + run.line_height);
+                has_glyphs = true;
+            }
+            if (glyph.underline || glyph.strikethrough) {
+                min_x = std::min(min_x, glyph.x);
+                max_x = std::max(max_x, glyph.x + glyph.w);
+                max_y = std::max(max_y, line_baseline + glyph.font_size * 0.25f);
+                has_glyphs = true;
+            }
             if (glyph.glyph_id == 0) continue;
 
             const TtfFont* font = font_system.get_font(glyph.font_id);
             if (!font) continue;
+
+            float draw_x = glyph.x + glyph.x_offset;
+            float draw_y = line_baseline + glyph.y + glyph.y_offset;
 
             const CachedGlyph* cached = cache.get_or_render(
                 *font,
                 glyph.font_id,
                 glyph.glyph_id,
                 glyph.font_size,
-                0.0f,
-                0.0f
+                draw_x,
+                draw_y,
+                glyph.synthetic_bold,
+                glyph.synthetic_italic
             );
 
             if (!cached || cached->data.empty()) continue;
 
-            float gx = glyph.x + static_cast<float>(cached->offset_x);
-            float gy = line_baseline + glyph.y + static_cast<float>(cached->offset_y);
+            float gx = std::floor(draw_x) + static_cast<float>(cached->offset_x);
+            float gy = std::floor(draw_y) + static_cast<float>(cached->offset_y);
             float gw = static_cast<float>(cached->width);
             float gh = static_cast<float>(cached->height);
 

@@ -1,13 +1,15 @@
 /// @file json.cpp
-/// @brief Sovereign, zero-dependency RFC 8259 JSON parser implementation in C++20.
+/// @brief Sovereign, zero-dependency, cache-contiguous RFC 8259 JSON parser in C++20.
 /// Part of the Nisaba Graphics & Animation Engine.
 
 #include "nisaba/json/json.hpp"
 #include <fstream>
 #include <sstream>
+#include <charconv>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 
 namespace nisaba::json {
 
@@ -29,19 +31,20 @@ public:
 
 private:
     void skip_whitespace() noexcept {
-        while (pos_ < src_.size()) {
-            char c = src_[pos_];
+        const size_t n = src_.size();
+        const char* data = src_.data();
+        while (pos_ < n) {
+            char c = data[pos_];
             if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
                 ++pos_;
-            } else if (c == '/' && pos_ + 1 < src_.size()) {
-                // Support C-style line and block comments (often in test JSON files)
-                if (src_[pos_ + 1] == '/') {
+            } else if (c == '/' && pos_ + 1 < n) {
+                if (data[pos_ + 1] == '/') {
                     pos_ += 2;
-                    while (pos_ < src_.size() && src_[pos_] != '\n') ++pos_;
-                } else if (src_[pos_ + 1] == '*') {
+                    while (pos_ < n && data[pos_] != '\n') ++pos_;
+                } else if (data[pos_ + 1] == '*') {
                     pos_ += 2;
-                    while (pos_ + 1 < src_.size() && !(src_[pos_] == '*' && src_[pos_ + 1] == '/')) ++pos_;
-                    if (pos_ + 1 < src_.size()) pos_ += 2;
+                    while (pos_ + 1 < n && !(data[pos_] == '*' && data[pos_ + 1] == '/')) ++pos_;
+                    if (pos_ + 1 < n) pos_ += 2;
                 } else {
                     break;
                 }
@@ -102,34 +105,17 @@ private:
         return std::nullopt;
     }
 
+    // Zero-allocation number parser using std::from_chars
     std::optional<JsonValue> parse_number() {
-        size_t start = pos_;
-        if (peek() == '-') ++pos_;
-
-        if (peek() == '0') {
-            ++pos_;
-        } else if (peek() >= '1' && peek() <= '9') {
-            while (peek() >= '0' && peek() <= '9') ++pos_;
-        } else {
-            return std::nullopt;
+        const char* first = src_.data() + pos_;
+        const char* last = src_.data() + src_.size();
+        double val = 0.0;
+        auto [ptr, ec] = std::from_chars(first, last, val);
+        if (ec == std::errc() && ptr > first) {
+            pos_ = static_cast<size_t>(ptr - src_.data());
+            return JsonValue(val);
         }
-
-        if (peek() == '.') {
-            ++pos_;
-            while (peek() >= '0' && peek() <= '9') ++pos_;
-        }
-
-        if (peek() == 'e' || peek() == 'E') {
-            ++pos_;
-            if (peek() == '+' || peek() == '-') ++pos_;
-            while (peek() >= '0' && peek() <= '9') ++pos_;
-        }
-
-        std::string num_str(src_.substr(start, pos_ - start));
-        char* end = nullptr;
-        double val = std::strtod(num_str.c_str(), &end);
-        if (end == num_str.c_str()) return std::nullopt;
-        return JsonValue(val);
+        return std::nullopt;
     }
 
     static void append_utf8(std::string& out, uint32_t codepoint) {
@@ -153,16 +139,35 @@ private:
     std::optional<std::string> parse_string_raw() {
         if (get() != '"') return std::nullopt;
 
+        // Fast-path scan for unescaped strings
+        size_t start = pos_;
+        const size_t n = src_.size();
+        const char* data = src_.data();
+        while (pos_ < n) {
+            char c = data[pos_];
+            if (c == '"') {
+                std::string res(data + start, pos_ - start);
+                ++pos_;
+                return res;
+            }
+            if (c == '\\') {
+                break;
+            }
+            ++pos_;
+        }
+
+        // Fallback for escaped characters
+        pos_ = start;
         std::string res;
         res.reserve(32);
 
-        while (pos_ < src_.size()) {
+        while (pos_ < n) {
             char c = get();
             if (c == '"') {
                 return res;
             }
             if (c == '\\') {
-                if (pos_ >= src_.size()) return std::nullopt;
+                if (pos_ >= n) return std::nullopt;
                 char esc = get();
                 switch (esc) {
                     case '"':  res.push_back('"'); break;
@@ -174,15 +179,36 @@ private:
                     case 'r':  res.push_back('\r'); break;
                     case 't':  res.push_back('\t'); break;
                     case 'u': {
-                        if (pos_ + 4 > src_.size()) return std::nullopt;
+                        if (pos_ + 4 > n) return std::nullopt;
                         uint32_t code = 0;
                         for (int i = 0; i < 4; ++i) {
                             char h = get();
                             code <<= 4;
-                            if (h >= '0' && h <= '9') code |= (h - '0');
-                            else if (h >= 'a' && h <= 'f') code |= (h - 'a' + 10);
-                            else if (h >= 'A' && h <= 'F') code |= (h - 'A' + 10);
+                            if (h >= '0' && h <= '9') code |= static_cast<uint32_t>(h - '0');
+                            else if (h >= 'a' && h <= 'f') code |= static_cast<uint32_t>(h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') code |= static_cast<uint32_t>(h - 'A' + 10);
                             else return std::nullopt;
+                        }
+                        // Handle UTF-16 surrogate pairs (\uD800..\uDBFF followed by \uDC00..\uDFFF)
+                        if (code >= 0xD800 && code <= 0xDBFF && pos_ + 6 <= n &&
+                            data[pos_] == '\\' && data[pos_ + 1] == 'u') {
+                            size_t saved = pos_;
+                            pos_ += 2;
+                            uint32_t low = 0;
+                            bool valid_low = true;
+                            for (int i = 0; i < 4; ++i) {
+                                char h = get();
+                                low <<= 4;
+                                if (h >= '0' && h <= '9') low |= static_cast<uint32_t>(h - '0');
+                                else if (h >= 'a' && h <= 'f') low |= static_cast<uint32_t>(h - 'a' + 10);
+                                else if (h >= 'A' && h <= 'F') low |= static_cast<uint32_t>(h - 'A' + 10);
+                                else { valid_low = false; break; }
+                            }
+                            if (valid_low && low >= 0xDC00 && low <= 0xDFFF) {
+                                code = 0x10000u + (((code - 0xD800u) << 10) | (low - 0xDC00u));
+                            } else {
+                                pos_ = saved;
+                            }
                         }
                         append_utf8(res, code);
                         break;
@@ -211,6 +237,7 @@ private:
         skip_whitespace();
         if (match(']')) return JsonValue(std::move(arr));
 
+        arr.reserve(8);
         while (true) {
             auto elem = parse_value();
             if (!elem) return std::nullopt;
@@ -233,6 +260,7 @@ private:
         skip_whitespace();
         if (match('}')) return JsonValue(std::move(obj));
 
+        obj.reserve(8);
         while (true) {
             skip_whitespace();
             if (peek() != '"') return std::nullopt;
@@ -246,7 +274,18 @@ private:
             auto val = parse_value();
             if (!val) return std::nullopt;
 
-            obj.emplace(std::move(*key), std::move(*val));
+            // Update existing key if duplicate or push_back
+            bool updated = false;
+            for (auto& kv : obj) {
+                if (kv.first == *key) {
+                    kv.second = std::move(*val);
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                obj.emplace_back(std::move(*key), std::move(*val));
+            }
 
             skip_whitespace();
             if (match('}')) break;
@@ -270,12 +309,15 @@ std::optional<JsonValue> JsonValue::parse(std::string_view json_str) {
 }
 
 std::optional<JsonValue> JsonValue::parse_file(const std::string& filepath) {
-    std::ifstream file(filepath, std::ios::in | std::ios::binary);
+    std::ifstream file(filepath, std::ios::in | std::ios::binary | std::ios::ate);
     if (!file.is_open()) return std::nullopt;
 
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    std::string content = ss.str();
+    auto size = file.tellg();
+    if (size <= 0) return std::nullopt;
+    file.seekg(0, std::ios::beg);
+
+    std::string content(static_cast<size_t>(size), '\0');
+    file.read(content.data(), size);
     return parse(content);
 }
 

@@ -365,6 +365,42 @@ void test_otf_canvas_rasterization() {
     std::cout << "  -> PASS" << std::endl;
 }
 
+void test_gdef_and_buffer_opentype_shaping() {
+    std::cout << "[Test] OpenType GDEF Classification & Buffer GSUB/GPOS Shaping Pipeline..." << std::endl;
+
+    FontSystem fs;
+    auto otf_id = fs.load_font_file(resolve_font("SourceSans3-Regular.otf"));
+    assert(otf_id.has_value());
+
+    const TtfFont* font = fs.get_font(*otf_id);
+    assert(font != nullptr);
+    if (font->gdef()) {
+        assert(font->gdef()->is_valid());
+    }
+
+    // Shape "To offset" with ligatures enabled and verify 'ff' ligature is formed in Buffer layout!
+    Buffer buf_lig(Metrics(24.0f, 30.0f));
+    buf_lig.set_ligatures_enabled(true);
+    buf_lig.set_text("To offset");
+    buf_lig.shape_until_scroll(fs);
+
+    Buffer buf_nolig(Metrics(24.0f, 30.0f));
+    buf_nolig.set_ligatures_enabled(false);
+    buf_nolig.set_text("To offset");
+    buf_nolig.shape_until_scroll(fs);
+
+    auto runs_lig = buf_lig.layout_runs();
+    auto runs_nolig = buf_nolig.layout_runs();
+    assert(runs_lig.size() == 1 && runs_nolig.size() == 1);
+    // "To offset" has 9 chars, with 'ff' ligature it becomes 8 glyphs
+    assert(runs_lig[0].glyphs.size() == 8);
+    assert(runs_nolig[0].glyphs.size() == 9);
+
+    std::cout << "  Buffer shaped 'To offset' into " << runs_lig[0].glyphs.size()
+              << " glyphs with GSUB ligatures & GPOS kerning." << std::endl;
+    std::cout << "  -> PASS" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " Nisaba CFF & Advanced OpenType Tests   " << std::endl;
@@ -375,6 +411,7 @@ int main() {
     test_opentype_gpos_kerning();
     test_synthetic_mark_to_base();
     test_otf_canvas_rasterization();
+    test_gdef_and_buffer_opentype_shaping();
 
     std::cout << "========================================" << std::endl;
     std::cout << " All CFF & OpenType tests PASSED!       " << std::endl;

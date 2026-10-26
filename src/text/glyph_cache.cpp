@@ -11,7 +11,9 @@ const CachedGlyph* GlyphCache::get_or_render(
     uint16_t glyph_id,
     float font_size,
     float x,
-    float y
+    float y,
+    bool synthetic_bold,
+    bool synthetic_italic
 ) {
     auto [int_x, x_bin] = compute_subpixel_bin(x);
     auto [int_y, y_bin] = compute_subpixel_bin(y);
@@ -19,17 +21,27 @@ const CachedGlyph* GlyphCache::get_or_render(
     uint32_t size_bits = 0;
     std::memcpy(&size_bits, &font_size, sizeof(float));
 
-    CacheKey key{font_id, glyph_id, size_bits, x_bin, y_bin};
+    uint8_t sflags = (synthetic_bold ? 1u : 0u) | (synthetic_italic ? 2u : 0u);
+    CacheKey key{font_id, glyph_id, size_bits, x_bin, y_bin, sflags};
 
     auto it = cache_.find(key);
     if (it != cache_.end()) {
         return &it->second;
     }
 
+    if (cache_.size() >= max_entries_) [[unlikely]] {
+        evict_if_needed();
+    }
+
     // Rasterize outline
     Path glyph_path;
-    if (!font.get_glyph_path(glyph_id, glyph_path, font_size) || glyph_path.is_empty()) {
+    bool ok = (sflags == 0)
+        ? font.get_glyph_path(glyph_id, glyph_path, font_size)
+        : font.get_glyph_path_styled(glyph_id, glyph_path, font_size, synthetic_bold, synthetic_italic);
+
+    if (!ok || glyph_path.is_empty()) {
         CachedGlyph empty_glyph{0, 0, 0, 0, {}};
+        lru_order_.push_back(key);
         auto [inserted_it, _] = cache_.emplace(key, std::move(empty_glyph));
         return &inserted_it->second;
     }
@@ -37,6 +49,7 @@ const CachedGlyph* GlyphCache::get_or_render(
     Rect bounds = glyph_path.bounds();
     if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
         CachedGlyph empty_glyph{0, 0, 0, 0, {}};
+        lru_order_.push_back(key);
         auto [inserted_it, _] = cache_.emplace(key, std::move(empty_glyph));
         return &inserted_it->second;
     }
@@ -64,6 +77,7 @@ const CachedGlyph* GlyphCache::get_or_render(
     auto trans_opt = glyph_path.transform(Transform::from_translate(shift_x, shift_y));
     if (!trans_opt) {
         CachedGlyph empty_glyph{0, 0, 0, 0, {}};
+        lru_order_.push_back(key);
         auto [inserted_it, _] = cache_.emplace(key, std::move(empty_glyph));
         return &inserted_it->second;
     }
@@ -71,6 +85,7 @@ const CachedGlyph* GlyphCache::get_or_render(
     auto mask_opt = Mask::allocate(w, h);
     if (!mask_opt) {
         CachedGlyph empty_glyph{0, 0, 0, 0, {}};
+        lru_order_.push_back(key);
         auto [inserted_it, _] = cache_.emplace(key, std::move(empty_glyph));
         return &inserted_it->second;
     }
@@ -90,6 +105,7 @@ const CachedGlyph* GlyphCache::get_or_render(
     cached.height = h;
     cached.data = mask.take_data();
 
+    lru_order_.push_back(key);
     auto [inserted_it, _] = cache_.emplace(key, std::move(cached));
     return &inserted_it->second;
 }

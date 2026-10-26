@@ -55,6 +55,8 @@ public:
 
     [[nodiscard]] uint32_t width() const noexcept { return pixmap_.width(); }
     [[nodiscard]] uint32_t height() const noexcept { return pixmap_.height(); }
+    [[nodiscard]] uint32_t canvas_width() const noexcept override { return pixmap_.width(); }
+    [[nodiscard]] uint32_t canvas_height() const noexcept override { return pixmap_.height(); }
     [[nodiscard]] IntSize size() const noexcept { return pixmap_.size(); }
     [[nodiscard]] PixmapMut& pixmap() noexcept { return pixmap_; }
 
@@ -92,6 +94,10 @@ public:
         return current_transform_;
     }
 
+    [[nodiscard]] Transform current_transform() const noexcept override {
+        return current_transform_;
+    }
+
     void translate(float dx, float dy) noexcept override {
         current_transform_ = current_transform_.pre_translate(dx, dy);
     }
@@ -110,8 +116,12 @@ public:
 
     // --- Vector Clipping ---
 
+    void clip_path(const Path& path, FillRule fill_rule = FillRule::Winding) override {
+        clip_path(path, fill_rule, true);
+    }
+
     /// Intersects the active clip region with the specified path.
-    void clip_path(const Path& path, FillRule fill_rule = FillRule::Winding, bool anti_alias = true) {
+    void clip_path(const Path& path, FillRule fill_rule, bool anti_alias) {
         Rect rect_box;
         if (std::abs(current_transform_.kx) < 1e-5f && std::abs(current_transform_.ky) < 1e-5f &&
             path.is_rect(&rect_box)) {
@@ -173,8 +183,12 @@ public:
         }
     }
 
+    void clip_rect(const Rect& rect) override {
+        clip_rect(rect, true);
+    }
+
     /// Intersects the active clip region with an axis-aligned rectangle.
-    void clip_rect(const Rect& rect, bool anti_alias = true) {
+    void clip_rect(const Rect& rect, bool anti_alias) {
         if (std::abs(current_transform_.kx) < 1e-5f && std::abs(current_transform_.ky) < 1e-5f) {
             if (!scissor_clip_.has_value()) return;
 
@@ -470,7 +484,7 @@ public:
         }
     }
 
-    void draw_pixmap(int32_t x, int32_t y, const PixmapRef& src, const PixmapPaint& paint = PixmapPaint()) {
+    void draw_pixmap(int32_t x, int32_t y, const PixmapRef& src, const PixmapPaint& paint = PixmapPaint()) override {
         if (!scissor_clip_.has_value()) return;
         painter::draw_pixmap(pixmap_, x, y, src, paint, current_transform_, current_mask(), scissor_clip_);
     }
@@ -513,7 +527,7 @@ public:
         const Transform4x4& transform3d,
         float opacity = 1.0f,
         BlendMode blend_mode = BlendMode::SourceOver
-    ) {
+    ) override {
         auto r = Rect::from_xywh(0.0f, 0.0f, static_cast<float>(src.width()), static_cast<float>(src.height()));
         if (r) {
             draw_pixmap_3d(src, *r, transform3d, opacity, blend_mode);

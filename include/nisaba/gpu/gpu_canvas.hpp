@@ -35,6 +35,8 @@ public:
 
     [[nodiscard]] uint32_t width() const noexcept { return surface_ ? surface_->width() : 0; }
     [[nodiscard]] uint32_t height() const noexcept { return surface_ ? surface_->height() : 0; }
+    [[nodiscard]] uint32_t canvas_width() const noexcept override { return surface_ ? surface_->width() : 0; }
+    [[nodiscard]] uint32_t canvas_height() const noexcept override { return surface_ ? surface_->height() : 0; }
     [[nodiscard]] std::shared_ptr<GpuSurface> surface() const noexcept { return surface_; }
     [[nodiscard]] Context* context() const noexcept { return context_.get(); }
 
@@ -47,6 +49,7 @@ public:
     void reset_transform() noexcept;
     void set_transform(const nisaba::Transform& ts) noexcept;
     [[nodiscard]] const nisaba::Transform& transform() const noexcept { return current_transform_; }
+    [[nodiscard]] nisaba::Transform current_transform() const noexcept override { return current_transform_; }
 
     void translate(float dx, float dy) noexcept override;
     void scale(float sx, float sy) noexcept override;
@@ -54,7 +57,7 @@ public:
     void concat(const nisaba::Transform& ts) noexcept override;
 
     // Clipping
-    void clip_rect(const nisaba::Rect& rect);
+    void clip_rect(const nisaba::Rect& rect) override;
     void clip_rect(const nisaba::ScreenIntRect& rect);
     void clip_path(const nisaba::Path& path, nisaba::FillRule fill_rule = nisaba::FillRule::Winding) override;
     void reset_clip() noexcept;
@@ -88,7 +91,7 @@ public:
     void fill_path(const nisaba::Path& path, const nisaba::Paint& paint, nisaba::FillRule fill_rule = nisaba::FillRule::Winding) override;
     void stroke_path(const nisaba::Path& path, const nisaba::Paint& paint, const nisaba::Stroke& stroke) override;
 
-    void draw_pixmap(int32_t x, int32_t y, const PixmapRef& src, const PixmapPaint& paint = PixmapPaint());
+    void draw_pixmap(int32_t x, int32_t y, const PixmapRef& src, const PixmapPaint& paint = PixmapPaint()) override;
     void draw_gpu_texture(int32_t x, int32_t y, const std::shared_ptr<GpuTexture>& texture, const PixmapPaint& paint = PixmapPaint());
 
     void draw_vertices(const nisaba::Vertices& vertices, BlendMode blend_mode = BlendMode::SourceOver, float opacity = 1.0f);

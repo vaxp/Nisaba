@@ -131,7 +131,7 @@ struct Metrics {
 /// Text shaping strategy.
 enum class Shaping : uint8_t {
     Basic,     /// Fast scalar advance shaping
-    Advanced   /// Advanced script analysis, font fallback, and contextual shaping
+    Advanced   /// Advanced script analysis, font fallback, GSUB/GPOS, and contextual shaping
 };
 
 /// Visual attributes associated with a run of text.
@@ -141,6 +141,13 @@ struct Attrs {
     Style style{Style::Normal};
     Stretch stretch{Stretch::Normal};
     std::optional<TextColor> color_opt{std::nullopt};
+    std::optional<TextColor> background_color_opt{std::nullopt};
+    std::optional<float> font_size_opt{std::nullopt};
+    float letter_spacing{0.0f};
+    float word_spacing{0.0f};
+    float baseline_shift{0.0f};
+    bool underline{false};
+    bool strikethrough{false};
     size_t metadata{0};
 
     Attrs() noexcept = default;
@@ -150,7 +157,24 @@ struct Attrs {
     Attrs& set_style(Style s) noexcept { style = s; return *this; }
     Attrs& set_stretch(Stretch st) noexcept { stretch = st; return *this; }
     Attrs& set_color(TextColor c) noexcept { color_opt = c; return *this; }
+    Attrs& set_background_color(TextColor c) noexcept { background_color_opt = c; return *this; }
+    Attrs& set_font_size(float sz) noexcept { font_size_opt = sz; return *this; }
+    Attrs& set_letter_spacing(float ls) noexcept { letter_spacing = ls; return *this; }
+    Attrs& set_word_spacing(float ws) noexcept { word_spacing = ws; return *this; }
+    Attrs& set_baseline_shift(float bs) noexcept { baseline_shift = bs; return *this; }
+    Attrs& set_underline(bool u = true) noexcept { underline = u; return *this; }
+    Attrs& set_strikethrough(bool s = true) noexcept { strikethrough = s; return *this; }
     Attrs& set_metadata(size_t meta) noexcept { metadata = meta; return *this; }
+
+    [[nodiscard]] bool has_custom_metrics_or_decorations() const noexcept {
+        return font_size_opt.has_value() ||
+               letter_spacing != 0.0f ||
+               word_spacing != 0.0f ||
+               baseline_shift != 0.0f ||
+               underline ||
+               strikethrough ||
+               background_color_opt.has_value();
+    }
 
     bool operator==(const Attrs& other) const noexcept = default;
 };

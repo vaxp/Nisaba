@@ -25,6 +25,7 @@ public:
     AttrsList& attrs_list_mut() noexcept { return attrs_list_; }
 
     const std::vector<LayoutLine>& layout() const noexcept { return layout_lines_; }
+    std::vector<LayoutLine>& layout_mut() noexcept { return layout_lines_; }
     bool is_shaped() const noexcept { return is_shaped_; }
 
     void reset_shaping() noexcept { is_shaped_ = false; layout_lines_.clear(); }
@@ -37,7 +38,9 @@ public:
         std::optional<float> wrap_width,
         Wrap wrap,
         Align align,
-        Shaping shaping
+        Shaping shaping,
+        bool enable_kerning = true,
+        bool enable_ligatures = false
     );
 
 private:
@@ -47,7 +50,7 @@ private:
     bool is_shaped_{false};
 };
 
-/// High-level text buffer managing multi-line text, wrapping, alignment, and rendering.
+/// High-level text buffer managing multi-line text, wrapping, alignment, overflow, and rendering.
 class Buffer {
 public:
     Buffer(Metrics metrics = Metrics(16.0f, 20.0f));
@@ -74,6 +77,18 @@ public:
     Shaping shaping() const noexcept { return shaping_; }
     void set_shaping(Shaping s) noexcept { shaping_ = s; reset_shaping(); }
 
+    Overflow overflow() const noexcept { return overflow_; }
+    void set_overflow(Overflow o) noexcept { overflow_ = o; reset_shaping(); }
+
+    std::optional<size_t> max_lines() const noexcept { return max_lines_; }
+    void set_max_lines(std::optional<size_t> ml) noexcept { max_lines_ = ml; reset_shaping(); }
+
+    bool kerning_enabled() const noexcept { return enable_kerning_; }
+    void set_kerning_enabled(bool enabled) noexcept { enable_kerning_ = enabled; reset_shaping(); }
+
+    bool ligatures_enabled() const noexcept { return enable_ligatures_; }
+    void set_ligatures_enabled(bool enabled) noexcept { enable_ligatures_ = enabled; reset_shaping(); }
+
     float scroll() const noexcept { return scroll_; }
     void set_scroll(float s) noexcept { scroll_ = s; }
 
@@ -93,7 +108,10 @@ public:
     /// Total visual height of all formatted lines.
     float total_height() const;
 
-    /// Draws the buffer onto a Canvas using pre-rendered glyph masks.
+    /// Maximum visual width across all formatted lines.
+    float max_line_width() const;
+
+    /// Draws the buffer onto a Canvas using pre-rendered glyph masks, decorations, and highlights.
     void draw(
         Canvas& canvas,
         GlyphCache& cache,
@@ -104,6 +122,8 @@ public:
     );
 
 private:
+    void apply_ellipsis_truncation(FontSystem& font_system, LayoutLine& line, float max_width) const;
+
     Metrics metrics_{16.0f, 20.0f};
     std::vector<BufferLine> lines_{};
     std::optional<float> width_{std::nullopt};
@@ -111,6 +131,10 @@ private:
     Wrap wrap_{Wrap::Word};
     Align align_{Align::Left};
     Shaping shaping_{Shaping::Advanced};
+    Overflow overflow_{Overflow::Visible};
+    std::optional<size_t> max_lines_{std::nullopt};
+    bool enable_kerning_{true};
+    bool enable_ligatures_{false};
     float scroll_{0.0f};
 };
 

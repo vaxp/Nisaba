@@ -26,6 +26,13 @@ enum class Align : uint8_t {
     End
 };
 
+/// Text overflow handling modes when constrained by width/height/max_lines.
+enum class Overflow : uint8_t {
+    Visible,
+    Clip,
+    Ellipsis
+};
+
 /// Represents an individual placed glyph within a laid-out line.
 struct LayoutGlyph {
     size_t start{0};                      /// Start byte index in line string
@@ -42,7 +49,13 @@ struct LayoutGlyph {
     float x_offset{0.0f};
     float y_offset{0.0f};
     std::optional<TextColor> color_opt{std::nullopt};
+    std::optional<TextColor> background_color_opt{std::nullopt};
     size_t metadata{0};
+    bool is_mark{false};
+    bool underline{false};
+    bool strikethrough{false};
+    bool synthetic_bold{false};
+    bool synthetic_italic{false};
 };
 
 /// A visually laid-out line of text containing placed glyphs.
@@ -61,6 +74,9 @@ struct LayoutRun {
     std::span<const LayoutGlyph> glyphs{};
     float line_top{0.0f};
     float line_height{20.0f};
+    float line_width{0.0f};
+    float max_ascent{0.0f};
+    float max_descent{0.0f};
 };
 
 } // namespace nisaba::text

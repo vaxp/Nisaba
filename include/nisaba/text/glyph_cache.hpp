@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include <unordered_map>
+#include <list>
 #include <memory>
 #include <cmath>
 #include <cstring>
@@ -54,13 +55,15 @@ struct CacheKey {
     uint32_t font_size_bits{0};
     SubpixelBin x_bin{SubpixelBin::Zero};
     SubpixelBin y_bin{SubpixelBin::Zero};
+    uint8_t style_flags{0}; // bit 0: synthetic_bold, bit 1: synthetic_italic
 
     bool operator==(const CacheKey& other) const noexcept {
         return font_id == other.font_id &&
                glyph_id == other.glyph_id &&
                font_size_bits == other.font_size_bits &&
                x_bin == other.x_bin &&
-               y_bin == other.y_bin;
+               y_bin == other.y_bin &&
+               style_flags == other.style_flags;
     }
 };
 
@@ -69,7 +72,7 @@ struct CacheKeyHash {
         size_t h = std::hash<uint32_t>{}(k.font_id);
         h ^= (std::hash<uint32_t>{}(k.font_size_bits) + 0x9e3779b9 + (h << 6) + (h >> 2));
         h ^= (std::hash<uint16_t>{}(k.glyph_id) + 0x9e3779b9 + (h << 6) + (h >> 2));
-        h ^= (static_cast<size_t>(k.x_bin) << 2) ^ static_cast<size_t>(k.y_bin);
+        h ^= (static_cast<size_t>(k.style_flags) << 4) ^ (static_cast<size_t>(k.x_bin) << 2) ^ static_cast<size_t>(k.y_bin);
         return h;
     }
 };
@@ -88,10 +91,10 @@ struct CachedGlyph {
     }
 };
 
-/// High-performance cache for rasterized glyph alpha masks.
+/// High-performance bounded cache for rasterized glyph alpha masks.
 class GlyphCache {
 public:
-    GlyphCache() = default;
+    explicit GlyphCache(size_t max_entries = 4096) noexcept : max_entries_(max_entries) {}
     ~GlyphCache() = default;
 
     /// Retrieves or rasterizes an 8-bit alpha mask for the glyph at (x, y) subpixel position.
@@ -101,18 +104,40 @@ public:
         uint16_t glyph_id,
         float font_size,
         float x,
-        float y
+        float y,
+        bool synthetic_bold = false,
+        bool synthetic_italic = false
     );
 
     void clear() noexcept {
         cache_.clear();
+        lru_order_.clear();
     }
 
     size_t size() const noexcept {
         return cache_.size();
     }
 
+    size_t max_entries() const noexcept {
+        return max_entries_;
+    }
+
+    void set_max_entries(size_t max_entries) noexcept {
+        max_entries_ = std::max<size_t>(64, max_entries);
+        evict_if_needed();
+    }
+
 private:
+    void evict_if_needed() noexcept {
+        while (cache_.size() > max_entries_ && !lru_order_.empty()) {
+            CacheKey oldest = lru_order_.front();
+            lru_order_.pop_front();
+            cache_.erase(oldest);
+        }
+    }
+
+    size_t max_entries_{4096};
+    std::list<CacheKey> lru_order_{};
     std::unordered_map<CacheKey, CachedGlyph, CacheKeyHash> cache_{};
 };
 

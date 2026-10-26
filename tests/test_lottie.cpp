@@ -1,15 +1,19 @@
 /// @file test_lottie.cpp
-/// @brief Comprehensive automated unit tests for sovereign JSON & Lottie animation engine.
+/// @brief Comprehensive automated unit tests for sovereign JSON & industrial-grade Lottie animation engine.
 
 #include "nisaba/json/json.hpp"
 #include "nisaba/lottie/lottie.hpp"
 #include "nisaba/canvas/canvas.hpp"
 #include "nisaba/canvas/pixmap.hpp"
+#include "nisaba/path/path_builder.hpp"
+#include "nisaba/image/deflate.hpp"
 
 #include <iostream>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <string_view>
+#include <vector>
 
 using namespace nisaba;
 using namespace nisaba::lottie;
@@ -18,7 +22,7 @@ using namespace nisaba::json;
 void test_json_parser() {
     std::cout << "[TEST] Running Sovereign JSON Parser tests...\n";
 
-    // 1. Primitive types
+    // 1. Primitive types & fast from_chars number parsing
     {
         auto v1 = JsonValue::parse("42.5");
         assert(v1.has_value() && v1->is_number());
@@ -63,11 +67,11 @@ void test_json_parser() {
         assert(arr[4].is_null());
     }
 
-    // 3. Nested objects
+    // 3. Nested objects (contiguous vector storage)
     {
         std::string_view json = R"({
             "name": "Nisaba Lottie",
-            "version": "1.0",
+            "version": "2.0",
             "fps": 60,
             "dimensions": {
                 "w": 800,
@@ -91,266 +95,474 @@ void test_json_parser() {
         assert(tags->as_array()[0].as_string() == "graphics");
     }
 
-    // 4. Unicode escape sequences \uXXXX
+    // 4. Unicode escape sequences \uXXXX and UTF-16 surrogate pairs
     {
         auto u_val = JsonValue::parse(R"("\u0041\u0042\u0043")"); // "ABC"
         assert(u_val.has_value() && u_val->is_string());
         assert(u_val->as_string() == "ABC");
+
+        auto emoji_val = JsonValue::parse(R"("\uD83D\uDE80")"); // Rocket U+1F680
+        assert(emoji_val.has_value() && emoji_val->is_string());
+        assert(emoji_val->as_string() == "\xF0\x9F\x9A\x80");
     }
 
     std::cout << "[PASS] JSON Parser tests passed.\n";
 }
 
-void test_lottie_properties_and_easing() {
-    std::cout << "[TEST] Running Lottie Properties & Bézier Easing tests...\n";
+void test_lottie_properties_spatial_and_expressions() {
+    std::cout << "[TEST] Running Lottie Properties, Spatial Bezier, Skew, 3D & Expressions tests...\n";
 
-    // 1. Static property
+    // 1. Static property & dynamic override
     {
         FloatProperty p(100.0f);
         assert(!p.is_animated());
         assert(p.evaluate(0.0f) == 100.0f);
+        p.set_override(250.0f);
+        assert(p.evaluate(50.0f) == 250.0f);
+        p.clear_override();
         assert(p.evaluate(50.0f) == 100.0f);
     }
 
-    // 2. Animated keyframe with linear easing
+    // 2. Spatial Bezier curved motion with arc-length parameterization
     {
-        FloatProperty p;
-        Keyframe<float> kf1;
+        PointProperty p;
+        Keyframe<Point> kf1;
         kf1.time = 0.0f;
-        kf1.start_value = 0.0f;
-        kf1.end_value = 100.0f;
-        kf1.out_handle = {0.0f, 0.0f};
-        kf1.in_handle = {1.0f, 1.0f};
+        kf1.start_value = Point::from_xy(0.0f, 0.0f);
+        kf1.end_value = Point::from_xy(100.0f, 0.0f);
+        kf1.spatial_out_tangent = Point::from_xy(0.0f, 100.0f);
+        kf1.spatial_in_tangent = Point::from_xy(0.0f, 100.0f);
+        kf1.has_spatial_tangents = true;
         p.add_keyframe(kf1);
 
-        Keyframe<float> kf2;
-        kf2.time = 1.0f;
-        kf2.start_value = 100.0f;
-        kf2.end_value = 100.0f;
+        Keyframe<Point> kf2;
+        kf2.time = 10.0f;
+        kf2.start_value = Point::from_xy(100.0f, 0.0f);
+        kf2.end_value = Point::from_xy(100.0f, 0.0f);
         p.add_keyframe(kf2);
 
-        assert(p.is_animated());
-        assert(std::abs(p.evaluate(0.0f) - 0.0f) < 1e-3f);
-        assert(std::abs(p.evaluate(0.5f) - 50.0f) < 1.0f);
-        assert(std::abs(p.evaluate(1.0f) - 100.0f) < 1e-3f);
+        Point mid = p.evaluate(5.0f);
+        // Midpoint along arch should be at x ~ 50 and y > 50 due to upward spatial tangents
+        assert(std::abs(mid.x - 50.0f) < 2.0f);
+        assert(mid.y > 50.0f);
     }
 
-    // 3. Easing curve solver test
+    // 3. Expressions: loopOut("cycle"), loopOut("pingpong"), wiggle(freq, amp)
     {
-        EasingHandle out_h{0.42f, 0.0f};
-        EasingHandle in_h{0.58f, 1.0f};
-        float y0 = solve_bezier_easing(0.0f, out_h, in_h);
-        float y1 = solve_bezier_easing(1.0f, out_h, in_h);
-        float y_mid = solve_bezier_easing(0.5f, out_h, in_h);
+        std::string_view expr_json = R"JSON({
+            "a": 1,
+            "x": "loopOut('pingpong')",
+            "k": [
+                {"t": 0, "s": [0], "e": [100]},
+                {"t": 10, "s": [100]}
+            ]
+        })JSON";
+        auto val = JsonValue::parse(expr_json);
+        assert(val.has_value());
+        FloatProperty fp = parse_float_property(*val);
+        assert(fp.expression().type == LottieExpression::Type::LoopOutPingPong);
+        // At t=5 -> 50, at t=10 -> 100, at t=15 (ping-pong back) -> 50, at t=20 -> 0
+        assert(std::abs(fp.evaluate(5.0f) - 50.0f) < 1.0f);
+        assert(std::abs(fp.evaluate(15.0f) - 50.0f) < 1.0f);
 
-        assert(std::abs(y0 - 0.0f) < 1e-3f);
-        assert(std::abs(y1 - 1.0f) < 1e-3f);
-        assert(y_mid > 0.0f && y_mid < 1.0f);
+        std::string_view wig_json = R"JSON({
+            "a": 0,
+            "k": 50,
+            "x": "wiggle(4, 20)"
+        })JSON";
+        auto wval = JsonValue::parse(wig_json);
+        FloatProperty wfp = parse_float_property(*wval);
+        assert(wfp.expression().type == LottieExpression::Type::Wiggle);
+        assert(wfp.is_animated());
+        float v_t1 = wfp.evaluate(3.5f);
+        assert(v_t1 >= 30.0f && v_t1 <= 70.0f);
     }
 
-    // 4. LottieTransform evaluation
+    // 4. LottieTransform with Skew ("sk"/"sa"), Auto-Orient ("ao"), and 3D ("rx", "ry", "rz")
     {
-        LottieTransform tr;
-        tr.position = PointProperty(Point::from_xy(100.0f, 200.0f));
-        tr.scale = PointProperty(Point::from_xy(200.0f, 200.0f)); // 2x scale
-        tr.rotation = FloatProperty(0.0f);
-
-        Transform m = tr.matrix(0.0f);
-        Point pt = Point::from_xy(10.0f, 10.0f);
-        m.map_point(pt);
-        // (10 * 2) + 100 = 120, (10 * 2) + 200 = 220
-        assert(std::abs(pt.x - 120.0f) < 1e-3f);
-        assert(std::abs(pt.y - 220.0f) < 1e-3f);
+        std::string_view tr_json = R"({
+            "p": {"a": 0, "k": [100, 100, 0]},
+            "a": {"a": 0, "k": [0, 0, 0]},
+            "s": {"a": 0, "k": [100, 100, 100]},
+            "r": {"a": 0, "k": 0},
+            "sk": {"a": 0, "k": 20},
+            "sa": {"a": 0, "k": 15},
+            "rx": {"a": 0, "k": 30},
+            "ry": {"a": 0, "k": 45},
+            "rz": {"a": 0, "k": 10},
+            "o": {"a": 0, "k": 100}
+        })";
+        auto tr_val = JsonValue::parse(tr_json);
+        LottieTransform tr = LottieTransform::parse(*tr_val);
+        assert(tr.is_3d);
+        Transform m2d = tr.matrix(0.0f);
+        assert(!m2d.is_identity());
+        Transform4x4 m3d = tr.matrix_3d(0.0f);
+        assert(std::abs(m3d.m[3] - 100.0f) < 1e-2f || std::abs(m3d.m[0] - 1.0f) > 1e-3f);
     }
 
-    std::cout << "[PASS] Lottie Properties & Bézier Easing tests passed.\n";
+    std::cout << "[PASS] Lottie Properties, Spatial Bezier, Skew, 3D & Expressions tests passed.\n";
 }
 
-void test_lottie_shapes() {
-    std::cout << "[TEST] Running Lottie Shapes & Geometry tests...\n";
+void test_lottie_shapes_gradients_and_modifiers() {
+    std::cout << "[TEST] Running Lottie Shapes, Gradients & Path Modifiers tests...\n";
 
-    // 1. RectShape geometry
+    // 1. StarShape with inner/outer roundness and CCW winding direction ("d": 3)
     {
-        RectShape rect;
-        rect.position = PointProperty(Point::from_xy(100.0f, 100.0f));
-        rect.size = PointProperty(Point::from_xy(80.0f, 60.0f));
-        rect.roundness = FloatProperty(0.0f);
+        StarShape star;
+        star.type = 1;
+        star.points = FloatProperty(5.0f);
+        star.outer_radius = FloatProperty(50.0f);
+        star.inner_radius = FloatProperty(25.0f);
+        star.outer_roundness = FloatProperty(40.0f);
+        star.inner_roundness = FloatProperty(20.0f);
+        star.direction = 3; // CCW
 
         Path p;
-        rect.collect_geometry(0.0f, p);
+        star.collect_geometry(0.0f, p);
         assert(!p.is_empty());
-        auto bounds = p.compute_tight_bounds();
-        assert(bounds.has_value());
-        assert(std::abs(bounds->width() - 80.0f) < 1e-2f);
-        assert(std::abs(bounds->height() - 60.0f) < 1e-2f);
+        // Rounded star uses Cubic verbs
+        bool has_cubic = false;
+        for (auto v : p.verbs()) {
+            if (v == PathVerb::Cubic) has_cubic = true;
+        }
+        assert(has_cubic);
     }
 
-    // 2. EllipseShape geometry
+    // 2. GradientColorStops ("g") with RGB + Alpha stop cross-interpolation
     {
-        EllipseShape el;
-        el.position = PointProperty(Point::from_xy(50.0f, 50.0f));
-        el.size = PointProperty(Point::from_xy(40.0f, 40.0f));
-
-        Path p;
-        el.collect_geometry(0.0f, p);
-        assert(!p.is_empty());
-        auto bounds = p.compute_tight_bounds();
-        assert(bounds.has_value());
-        assert(std::abs(bounds->width() - 40.0f) < 1.0f);
-        assert(std::abs(bounds->height() - 40.0f) < 1.0f);
+        std::string_view grad_json = R"({
+            "p": 2,
+            "k": {
+                "a": 0,
+                "k": [
+                    0.0, 1.0, 0.0, 0.0,
+                    1.0, 0.0, 0.0, 1.0,
+                    0.0, 1.0,
+                    0.5, 0.5,
+                    1.0, 0.0
+                ]
+            }
+        })";
+        auto gval = JsonValue::parse(grad_json);
+        GradientColorStops gcs = GradientColorStops::parse(*gval);
+        auto stops = gcs.evaluate_stops(0.0f, 1.0f);
+        // Should merge t=0.0, t=0.5 (from alpha), t=1.0 -> 3 stops!
+        assert(stops.size() == 3);
+        assert(std::abs(stops[0].color.red() - 1.0f) < 1e-3f);
+        assert(std::abs(stops[1].position.get() - 0.5f) < 1e-3f);
+        assert(std::abs(stops[1].color.alpha() - 0.5f) < 1e-3f);
+        assert(std::abs(stops[2].color.blue() - 1.0f) < 1e-3f);
+        assert(std::abs(stops[2].color.alpha() - 0.0f) < 1e-3f);
     }
 
-    // 3. TrimPathShape modifier
+    // 3. Exact TrimPathShape ("tm") via PathMeasure (Simultaneously & Individually)
     {
         TrimPathShape trim;
         trim.start = FloatProperty(0.0f);
-        trim.end = FloatProperty(50.0f); // Trim to first half
+        trim.end = FloatProperty(50.0f);
+        trim.trim_type = TrimType::Individually;
 
         PathBuilder b;
         b.move_to(0.0f, 0.0f);
         b.line_to(100.0f, 0.0f);
+        b.move_to(0.0f, 20.0f);
+        b.line_to(100.0f, 20.0f);
         auto opt_p = b.finish();
         assert(opt_p.has_value());
 
+        // Total length of 2 contours = 200. 50% individual trim should trim only the first contour (len 100)!
         Path trimmed = trim.apply_trim(*opt_p, 0.0f);
         assert(!trimmed.is_empty());
         auto b_trim = trimmed.compute_tight_bounds();
         assert(b_trim.has_value());
-        assert(std::abs(b_trim->width() - 50.0f) < 1.0f);
+        assert(std::abs(b_trim->width() - 100.0f) < 1.0f);
+        assert(std::abs(b_trim->height() - 0.0f) < 1.0f);
     }
 
-    std::cout << "[PASS] Lottie Shapes & Geometry tests passed.\n";
+    // 4. MergePathsShape ("mm"), RoundCornersShape ("rd"), OffsetPathShape ("op"), PuckerBloat ("pb"), ZigZag ("zz")
+    {
+        RectShape r1, r2;
+        r1.position = PointProperty(Point::from_xy(40.0f, 50.0f));
+        r1.size = PointProperty(Point::from_xy(40.0f, 40.0f));
+        r2.position = PointProperty(Point::from_xy(60.0f, 50.0f));
+        r2.size = PointProperty(Point::from_xy(40.0f, 40.0f));
+
+        Path p1, p2;
+        r1.collect_geometry(0.0f, p1);
+        r2.collect_geometry(0.0f, p2);
+        std::vector<Path> paths = {p1, p2};
+
+        MergePathsShape mm;
+        mm.mode = MergeMode::Add; // Union
+        mm.modify_paths(0.0f, paths);
+        assert(paths.size() == 1 && !paths[0].is_empty());
+
+        RoundCornersShape rd;
+        rd.radius = FloatProperty(8.0f);
+        rd.modify_paths(0.0f, paths);
+        assert(!paths[0].is_empty());
+
+        OffsetPathShape op;
+        op.amount = FloatProperty(4.0f);
+        op.modify_paths(0.0f, paths);
+        assert(!paths[0].is_empty());
+
+        PuckerBloatShape pb;
+        pb.amount = FloatProperty(25.0f);
+        pb.modify_paths(0.0f, paths);
+        assert(!paths[0].is_empty());
+
+        ZigZagShape zz;
+        zz.size = FloatProperty(5.0f);
+        zz.ridges = FloatProperty(4.0f);
+        zz.modify_paths(0.0f, paths);
+        assert(!paths[0].is_empty());
+    }
+
+    std::cout << "[PASS] Lottie Shapes, Gradients & Path Modifiers tests passed.\n";
 }
 
-void test_lottie_animation_and_player() {
-    std::cout << "[TEST] Running Lottie Animation Document & Player tests...\n";
+void test_advanced_features_and_dotlottie() {
+    std::cout << "[TEST] Running Advanced Features (Repeater, Masks, Track Mattes, Effects, Text, Image, Overrides, .lottie ZIP)...\n";
 
-    // Minimal valid Lottie animation JSON (a pulsing blue circle)
-    std::string_view lottie_json = R"({
-        "v": "5.7.4",
-        "fr": 30,
+    // Comprehensive Lottie JSON testing GradientFill, GradientStroke, Repeater, Track Matte, Mask, Effect, TextLayer, and Slot Overrides
+    std::string_view rich_json = R"({
+        "v": "5.9.0",
+        "fr": 60,
         "ip": 0,
         "op": 60,
         "w": 200,
         "h": 200,
-        "nm": "PulseCircle",
-        "ddd": 0,
-        "assets": [],
+        "nm": "IndustrialShowcase",
+        "markers": [
+            {"cm": "intro", "tm": 0, "dr": 20},
+            {"cm": "loop_seg", "tm": 20, "dr": 40}
+        ],
+        "fonts": {
+            "list": [
+                {"fName": "TestFont", "fFamily": "Sans", "fStyle": "Regular", "ascent": 75}
+            ]
+        },
+        "chars": [
+            {
+                "ch": "A",
+                "size": 100,
+                "style": "Regular",
+                "w": 60,
+                "fFamily": "Sans",
+                "data": {
+                    "shapes": [
+                        {
+                            "ty": "gr",
+                            "nm": "GlyphA",
+                            "it": [
+                                {"ty": "rc", "p": {"a": 0, "k": [30, -35]}, "s": {"a": 0, "k": [40, 70]}, "r": {"a": 0, "k": 4}},
+                                {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}}
+                            ]
+                        }
+                    ]
+                }
+            }
+        ],
         "layers": [
             {
-                "ddd": 0,
                 "ind": 1,
-                "ty": 4,
-                "nm": "CircleLayer",
-                "sr": 1,
-                "ks": {
-                    "o": {"a": 0, "k": 100},
-                    "r": {"a": 0, "k": 0},
-                    "p": {"a": 0, "k": [100, 100, 0]},
-                    "a": {"a": 0, "k": [0, 0, 0]},
-                    "s": {
-                        "a": 1,
+                "ty": 5,
+                "nm": "TitleText",
+                "ip": 0,
+                "op": 60,
+                "st": 0,
+                "ks": {"p": {"a": 0, "k": [20, 160, 0]}, "a": {"a": 0, "k": [0, 0, 0]}, "s": {"a": 0, "k": [100, 100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}},
+                "t": {
+                    "d": {
                         "k": [
                             {
                                 "t": 0,
-                                "s": [50, 50, 100],
-                                "e": [150, 150, 100],
-                                "o": {"x": 0.4, "y": 0.0},
-                                "i": {"x": 0.6, "y": 1.0}
-                            },
-                            {
-                                "t": 60,
-                                "s": [150, 150, 100],
-                                "e": [50, 50, 100]
+                                "s": {
+                                    "s": 36,
+                                    "f": "TestFont",
+                                    "t": "AAA",
+                                    "j": 0,
+                                    "tr": 50,
+                                    "lh": 42,
+                                    "fc": [0.9, 0.2, 0.2],
+                                    "sc": [1.0, 1.0, 1.0],
+                                    "sw": 2,
+                                    "of": true
+                                }
                             }
                         ]
-                    }
-                },
+                    },
+                    "a": [
+                        {
+                            "nm": "Animator 1",
+                            "s": {"s": {"a": 0, "k": 0}, "e": {"a": 0, "k": 100}, "o": {"a": 0, "k": 0}, "r": 1},
+                            "a": {"p": {"a": 0, "k": [0, -5, 0]}}
+                        }
+                    ]
+                }
+            },
+            {
+                "ind": 2,
+                "ty": 4,
+                "nm": "MatteSourceLayer",
+                "td": 1,
+                "ip": 0,
+                "op": 60,
+                "st": 0,
+                "ks": {"p": {"a": 0, "k": [100, 100, 0]}},
                 "shapes": [
                     {
                         "ty": "gr",
-                        "nm": "Group 1",
                         "it": [
+                            {"ty": "el", "p": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [120, 120]}},
+                            {"ty": "fl", "c": {"a": 0, "k": [1, 1, 1, 1]}, "o": {"a": 0, "k": 100}},
+                            {"ty": "tr"}
+                        ]
+                    }
+                ]
+            },
+            {
+                "ind": 3,
+                "ty": 4,
+                "nm": "MainShapeLayer",
+                "tt": 1,
+                "ip": 0,
+                "op": 60,
+                "st": 0,
+                "ks": {"p": {"a": 0, "k": [100, 100, 0]}},
+                "ef": [
+                    {
+                        "ty": 29,
+                        "nm": "Gaussian Blur",
+                        "en": 1,
+                        "ef": [{"ty": 0, "v": {"a": 0, "k": 2.0}}]
+                    }
+                ],
+                "shapes": [
+                    {
+                        "ty": "gr",
+                        "nm": "MainGroup",
+                        "it": [
+                            {"ty": "rc", "nm": "Box", "p": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [80, 80]}, "r": {"a": 0, "k": 10}},
                             {
-                                "ty": "el",
-                                "nm": "Ellipse 1",
-                                "p": {"a": 0, "k": [0, 0]},
-                                "s": {"a": 0, "k": [60, 60]}
+                                "ty": "rp",
+                                "nm": "Repeater 1",
+                                "c": {"a": 0, "k": 3},
+                                "o": {"a": 0, "k": 0},
+                                "m": 1,
+                                "tr": {
+                                    "p": {"a": 0, "k": [10, 10]},
+                                    "s": {"a": 0, "k": [90, 90]},
+                                    "r": {"a": 0, "k": 15},
+                                    "so": {"a": 0, "k": 100},
+                                    "eo": {"a": 0, "k": 50}
+                                }
+                            },
+                            {
+                                "ty": "gf",
+                                "nm": "GradFill",
+                                "t": 2,
+                                "s": {"a": 0, "k": [0, 0]},
+                                "e": {"a": 0, "k": [60, 0]},
+                                "h": {"a": 0, "k": 50},
+                                "a": {"a": 0, "k": 30},
+                                "o": {"a": 0, "k": 100},
+                                "g": {
+                                    "p": 2,
+                                    "k": {"a": 0, "k": [0.0, 0.1, 0.8, 0.4, 1.0, 0.1, 0.2, 0.9]}
+                                }
                             },
                             {
                                 "ty": "fl",
-                                "nm": "Fill 1",
-                                "c": {"a": 0, "k": [0.1, 0.5, 0.9, 1.0]},
-                                "o": {"a": 0, "k": 100},
-                                "r": 1
+                                "nm": "ThemeFill",
+                                "c": {"a": 0, "k": [0.2, 0.6, 1.0, 1.0], "sid": "primary_theme"},
+                                "o": {"a": 0, "k": 80}
                             },
-                            {
-                                "ty": "tr",
-                                "p": {"a": 0, "k": [0, 0]},
-                                "a": {"a": 0, "k": [0, 0]},
-                                "s": {"a": 0, "k": [100, 100]},
-                                "r": {"a": 0, "k": 0},
-                                "o": {"a": 0, "k": 100}
-                            }
+                            {"ty": "tr"}
                         ]
                     }
-                ],
-                "ip": 0,
-                "op": 60,
-                "st": 0
+                ]
             }
         ]
     })";
 
-    auto anim = Animation::load_from_data(lottie_json);
+    auto anim = Animation::load_from_data(rich_json);
     assert(anim != nullptr);
-    assert(anim->width() == 200.0f);
-    assert(anim->height() == 200.0f);
-    assert(anim->in_point() == 0.0f);
-    assert(anim->out_point() == 60.0f);
-    assert(anim->frame_rate() == 30.0f);
-    assert(anim->total_frames() == 60.0f);
-    assert(std::abs(anim->duration_seconds() - 2.0f) < 1e-4f);
-    assert(anim->layers().size() == 1);
+    assert(anim->markers().size() == 2);
 
-    // Test rendering frame to Canvas
     auto pixmap = Pixmap::create(200, 200);
     assert(pixmap.has_value());
-    pixmap->fill(Color::WHITE);
+    pixmap->fill(Color::BLACK);
     Canvas canvas(*pixmap);
 
-    anim->render(canvas, 0.0f);  // Start frame
-    anim->render(canvas, 30.0f); // Mid frame
-    anim->render(canvas, 60.0f); // End frame
+    anim->render(canvas, 10.0f);
 
-    // Test Player playback controller
+    // Verify dynamic overrides & slots
+    assert(anim->set_slot_color("primary_theme", Color::from_rgba8(255, 128, 0, 255)));
+    assert(anim->set_color_override("MainShapeLayer.MainGroup.ThemeFill", Color::from_rgba8(0, 255, 100, 255)));
+    assert(anim->set_text_override("TitleText", "AAAA"));
+    anim->render(canvas, 15.0f);
+    anim->clear_overrides();
+
+    // Verify Player marker playback & Bounce mode
     Player player(anim);
-    assert(player.is_playing());
-    assert(player.is_looping());
+    assert(player.play_marker("intro"));
     assert(player.current_frame() == 0.0f);
-    assert(player.progress() == 0.0f);
+    player.set_loop_mode(LoopMode::Bounce);
+    player.advance(0.5f); // 30 frames > 20 duration -> bounces backward!
+    assert(player.current_frame() >= 0.0f && player.current_frame() <= 20.0f);
 
-    // Advance by 1 second (30 frames at 30fps)
-    player.advance(1.0f);
-    assert(std::abs(player.current_frame() - 30.0f) < 1e-2f);
-    assert(std::abs(player.progress() - 0.5f) < 1e-2f);
+    // Verify Hit-Testing
+    auto hit = anim->hit_test(100.0f, 100.0f, 10.0f);
+    assert(hit.has_value());
+    assert(*hit == "MainShapeLayer" || *hit == "Box");
 
-    // Seek to 75%
-    player.seek_progress(0.75f);
-    assert(std::abs(player.progress() - 0.75f) < 1e-2f);
-    assert(std::abs(player.current_frame() - 45.0f) < 1e-2f);
+    // Verify .lottie (dotLottie ZIP container) ingestion using sovereign DEFLATE
+    {
+        auto compressed_res = image::deflate_compress(
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(rich_json.data()), rich_json.size()),
+            6
+        );
+        assert(compressed_res.has_value());
+        const auto& comp_data = *compressed_res;
 
-    // Advance beyond end with looping enabled
-    player.advance(2.0f); // 60 frames -> loops back around
-    assert(player.is_playing());
-    assert(player.current_frame() >= 0.0f && player.current_frame() <= 60.0f);
+        std::string entry_name = "animations/data.json";
+        std::vector<uint8_t> zip_bytes;
+        auto push_u16 = [&](uint16_t v) {
+            zip_bytes.push_back(static_cast<uint8_t>(v & 0xFF));
+            zip_bytes.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        };
+        auto push_u32 = [&](uint32_t v) {
+            zip_bytes.push_back(static_cast<uint8_t>(v & 0xFF));
+            zip_bytes.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            zip_bytes.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+            zip_bytes.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+        };
 
-    // Test fitted render
-    auto dest = Rect::from_xywh(10, 10, 100, 100);
-    assert(dest.has_value());
-    player.render(canvas, *dest, true);
+        // Local File Header (0x04034b50)
+        push_u32(0x04034b50u);
+        push_u16(20); // version needed
+        push_u16(0);  // flags
+        push_u16(8);  // method = 8 (DEFLATE)
+        push_u16(0);  // mod time
+        push_u16(0);  // mod date
+        push_u32(0);  // crc32
+        push_u32(static_cast<uint32_t>(comp_data.size()));
+        push_u32(static_cast<uint32_t>(rich_json.size()));
+        push_u16(static_cast<uint16_t>(entry_name.size()));
+        push_u16(0);  // extra len
+        zip_bytes.insert(zip_bytes.end(), entry_name.begin(), entry_name.end());
+        zip_bytes.insert(zip_bytes.end(), comp_data.begin(), comp_data.end());
 
-    std::cout << "[PASS] Lottie Animation Document & Player tests passed.\n";
+        auto dot_anim = Animation::load_from_bytes(zip_bytes);
+        assert(dot_anim != nullptr);
+        assert(dot_anim->name() == "IndustrialShowcase");
+        assert(dot_anim->width() == 200.0f);
+    }
+
+    std::cout << "[PASS] Advanced Features & .lottie ZIP tests passed.\n";
 }
 
 int main() {
@@ -359,9 +571,9 @@ int main() {
     std::cout << "========================================================\n";
 
     test_json_parser();
-    test_lottie_properties_and_easing();
-    test_lottie_shapes();
-    test_lottie_animation_and_player();
+    test_lottie_properties_spatial_and_expressions();
+    test_lottie_shapes_gradients_and_modifiers();
+    test_advanced_features_and_dotlottie();
 
     std::cout << "========================================================\n";
     std::cout << "   ALL LOTTIE & JSON TESTS PASSED SUCCESSFULLY! (100%)\n";

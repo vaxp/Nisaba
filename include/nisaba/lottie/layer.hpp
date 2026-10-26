@@ -1,14 +1,17 @@
 #pragma once
 
 /// @file layer.hpp
-/// @brief Lottie layer hierarchy, transform inheritance, and layer rendering.
+/// @brief Lottie layer hierarchy, masks, track mattes, effects, images, typography, 3D, and rendering.
 
 #include "nisaba/lottie/lottie_types.hpp"
 #include "nisaba/lottie/property.hpp"
 #include "nisaba/lottie/shape.hpp"
 #include "nisaba/canvas/canvas.hpp"
+#include "nisaba/canvas/pixmap.hpp"
 #include "nisaba/color/color.hpp"
 #include "nisaba/math/transform.hpp"
+#include "nisaba/math/transform4x4.hpp"
+#include "nisaba/text/font_system.hpp"
 
 #include <vector>
 #include <memory>
@@ -18,17 +21,144 @@
 
 namespace nisaba::lottie {
 
-// Forward declarations
 class LottieLayer;
+
+// ── Asset & Font Definitions ──────────────────────────────────────────────
+
+struct LottieImageAsset {
+    std::string id;
+    std::string directory; // "u"
+    std::string filename;  // "p" (or data URI)
+    float width = 0.0f;
+    float height = 0.0f;
+    bool embedded = false; // "e" == 1
+    std::optional<Pixmap> pixmap;
+};
+
+struct LottieFontDef {
+    std::string name;      // "fName"
+    std::string family;    // "fFamily"
+    std::string style;     // "fStyle"
+    std::string path;      // "fPath"
+    float ascent = 75.0f;
+    std::optional<uint32_t> loaded_font_id;
+};
+
+struct LottieGlyphChar {
+    std::string ch;        // "ch"
+    std::string style;     // "style"
+    std::string family;    // "fFamily"
+    float size = 100.0f;   // "size"
+    float width = 0.0f;    // "w"
+    std::vector<std::shared_ptr<ShapeGroup>> shapes;
+};
+
+struct LottieAssetRegistry {
+    std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>> precomps;
+    std::unordered_map<std::string, LottieImageAsset> images;
+    std::unordered_map<std::string, LottieFontDef> fonts;
+    std::vector<LottieGlyphChar> chars;
+    std::shared_ptr<text::FontSystem> font_system;
+    float comp_width = 512.0f;
+    float comp_height = 512.0f;
+
+    [[nodiscard]] const LottieGlyphChar* find_char(std::string_view ch, std::string_view family, std::string_view style) const noexcept;
+};
+
+// ── Layer Mask ("masksProperties") ────────────────────────────────────────
 
 struct Mask {
     MaskMode mode = MaskMode::Add;
     ShapeProperty shape;
     FloatProperty opacity{100.0f};
+    FloatProperty expansion{0.0f}; // "x"
+    PointProperty feather{Point::zero()}; // "f"
     bool inverted = false;
 
     static Mask parse(const json::JsonValue& val);
 };
+
+// ── Layer Effects ("ef") ──────────────────────────────────────────────────
+
+struct LayerEffect {
+    EffectType type = EffectType::Unknown;
+    std::string name;
+    bool enabled = true;
+
+    // Effect parameters
+    FloatProperty blurriness{0.0f};        // Blur (ty=29)
+    int blur_dimensions = 1;               // 1=Both, 2=Horizontal, 3=Vertical
+    ColorProperty shadow_color{Color::BLACK}; // DropShadow (ty=25) & Fill (ty=21)
+    FloatProperty shadow_opacity{100.0f};  // DropShadow (0..255 or 0..100) / Fill (0..1)
+    FloatProperty shadow_direction{135.0f};// DropShadow angle in degrees
+    FloatProperty shadow_distance{5.0f};   // DropShadow distance
+    FloatProperty shadow_softness{5.0f};   // DropShadow blur radius
+
+    ColorProperty tint_black{Color::BLACK};   // Tint (ty=20) / Tritone shadows (ty=23)
+    ColorProperty tint_mid{Color::from_rgba8(128, 128, 128, 255)}; // Tritone midtones (ty=23)
+    ColorProperty tint_white{Color::WHITE};   // Tint (ty=20) / Tritone highlights (ty=23)
+    FloatProperty tint_amount{100.0f};        // Tint / Tritone blend amount [0..100]
+
+    static LayerEffect parse(const json::JsonValue& val);
+};
+
+// ── Text Document & Animators ("ty": 5) ───────────────────────────────────
+
+struct TextDocument {
+    std::string text;               // "t" (lines separated by \r or \n)
+    std::string font_name;          // "f"
+    float font_size = 24.0f;        // "s"
+    Color fill_color = Color::BLACK;// "fc"
+    Color stroke_color = Color::BLACK; // "sc"
+    float stroke_width = 0.0f;      // "sw"
+    bool stroke_over_fill = false;  // "of"
+    TextJustify justify = TextJustify::Left; // "j"
+    float tracking = 0.0f;          // "tr"
+    float line_height = 28.8f;      // "lh"
+    float baseline_shift = 0.0f;    // "ls"
+    Point box_position = Point::zero(); // "ps"
+    Point box_size = Point::zero();     // "sz"
+
+    static TextDocument parse(const json::JsonValue& val);
+};
+
+struct TextRangeSelector {
+    FloatProperty start{0.0f};     // "s" [0..100]
+    FloatProperty end{100.0f};     // "e" [0..100]
+    FloatProperty offset{0.0f};    // "o" [-100..100]
+    int units = 1;                 // "r": 1 = Percentage, 2 = Index
+    int based_on = 1;              // "b": 1 = Characters, 2 = Characters excluding spaces, 3 = Words, 4 = Lines
+    int shape = 1;                 // "sh": 1 = Square, 2 = Ramp Up, 3 = Ramp Down, 4 = Triangle, 5 = Round, 6 = Smooth
+
+    [[nodiscard]] float compute_factor(size_t index, size_t total_count, float frame) const noexcept;
+    static TextRangeSelector parse(const json::JsonValue& val);
+};
+
+struct TextAnimator {
+    std::string name;
+    TextRangeSelector selector;
+    PointProperty position{Point::zero()};
+    PointProperty scale{Point::from_xy(100.0f, 100.0f)};
+    FloatProperty rotation{0.0f};
+    FloatProperty opacity{100.0f};
+    ColorProperty fill_color{Color::BLACK};
+    ColorProperty stroke_color{Color::BLACK};
+    FloatProperty stroke_width{0.0f};
+    FloatProperty tracking{0.0f};
+
+    bool has_position = false;
+    bool has_scale = false;
+    bool has_rotation = false;
+    bool has_opacity = false;
+    bool has_fill_color = false;
+    bool has_stroke_color = false;
+    bool has_stroke_width = false;
+    bool has_tracking = false;
+
+    static TextAnimator parse(const json::JsonValue& val);
+};
+
+// ── Base Layer Class ──────────────────────────────────────────────────────
 
 class LottieLayer {
 public:
@@ -43,24 +173,51 @@ public:
     float start_time = 0.0f;
     float time_stretch = 1.0f;
     LottieTransform transform;
+    nisaba::BlendMode blend_mode = nisaba::BlendMode::SourceOver;
     MatteType matte_type = MatteType::None;
+    int matte_parent_index = -1; // "tp" in Lottie 1.0+
     bool is_matte_target = false;
     bool hidden = false;
+    bool auto_orient = false;    // "ao" == 1
     std::vector<Mask> masks;
+    std::vector<LayerEffect> effects;
+
+    // Pre-linked raw pointers resolved once at load time (O(1), 0 heap alloc per frame)
+    const LottieLayer* parent_ptr = nullptr;
+    const LottieLayer* matte_layer_ptr = nullptr;
 
     [[nodiscard]] bool is_active(float frame) const noexcept {
-        return !hidden && (frame >= in_point && frame <= out_point);
+        return !hidden && (frame >= in_point && frame < out_point);
     }
 
+    /// @brief Compute global 2D transform using pre-linked parent_ptr (zero allocations).
+    [[nodiscard]] Transform compute_global_transform(float frame) const noexcept;
+
+    /// @brief Legacy overload with layer_map for backward compatibility.
     [[nodiscard]] Transform compute_global_transform(
         float frame,
         const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map) const;
 
+    /// @brief Compute global 3D 4x4 transform matrix.
+    [[nodiscard]] Transform4x4 compute_global_transform_3d(float frame, float comp_w = 512.0f, float comp_h = 512.0f) const noexcept;
+
+    [[nodiscard]] bool has_3d_hierarchy() const noexcept;
+
+    /// @brief Render layer content using full LottieAssetRegistry.
+    virtual void render_with_assets(
+        RenderContext& ctx,
+        float frame,
+        const LottieAssetRegistry& assets) const;
+
+    /// @brief Legacy render entry point (forwards to render_with_assets).
     virtual void render(
         RenderContext& ctx,
         float frame,
         const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const = 0;
+        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const;
+
+    /// @brief Collect global vector bounds / paths for hit-testing.
+    virtual bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const;
 
     static std::shared_ptr<LottieLayer> parse(const json::JsonValue& val);
 };
@@ -70,11 +227,12 @@ class ShapeLayer : public LottieLayer {
 public:
     std::vector<std::shared_ptr<LottieShapeItem>> shapes;
 
-    void render(
+    void render_with_assets(
         RenderContext& ctx,
         float frame,
-        const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const override;
+        const LottieAssetRegistry& assets) const override;
+
+    bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const override;
 
     static std::shared_ptr<ShapeLayer> parse(const json::JsonValue& val);
 };
@@ -85,12 +243,14 @@ public:
     float width = 0.0f;
     float height = 0.0f;
     Color solid_color = Color::BLACK;
+    std::optional<Color> color_override;
 
-    void render(
+    void render_with_assets(
         RenderContext& ctx,
         float frame,
-        const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const override;
+        const LottieAssetRegistry& assets) const override;
+
+    bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const override;
 
     static std::shared_ptr<SolidLayer> parse(const json::JsonValue& val);
 };
@@ -104,11 +264,12 @@ public:
     FloatProperty time_remap{0.0f};
     bool has_time_remap = false;
 
-    void render(
+    void render_with_assets(
         RenderContext& ctx,
         float frame,
-        const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const override;
+        const LottieAssetRegistry& assets) const override;
+
+    bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const override;
 
     static std::shared_ptr<PrecompLayer> parse(const json::JsonValue& val);
 };
@@ -116,11 +277,10 @@ public:
 // Null / Controller Layer ("ty": 3)
 class NullLayer : public LottieLayer {
 public:
-    void render(
+    void render_with_assets(
         RenderContext& ctx,
         float frame,
-        const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const override;
+        const LottieAssetRegistry& assets) const override;
 
     static std::shared_ptr<NullLayer> parse(const json::JsonValue& val);
 };
@@ -130,16 +290,48 @@ class ImageLayer : public LottieLayer {
 public:
     std::string ref_id;
 
-    void render(
+    void render_with_assets(
         RenderContext& ctx,
         float frame,
-        const std::unordered_map<int, std::shared_ptr<LottieLayer>>& layer_map,
-        const std::unordered_map<std::string, std::vector<std::shared_ptr<LottieLayer>>>& precomp_assets) const override;
+        const LottieAssetRegistry& assets) const override;
+
+    bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const override;
 
     static std::shared_ptr<ImageLayer> parse(const json::JsonValue& val);
 };
 
-// Layer tree renderer (evaluates layers in proper order and hierarchy)
+// Text / Typography Layer ("ty": 5)
+class TextLayer : public LottieLayer {
+public:
+    std::vector<Keyframe<TextDocument>> keyframes;
+    TextDocument static_doc;
+    std::optional<std::string> text_override;
+    std::vector<TextAnimator> animators;
+
+    [[nodiscard]] const TextDocument& evaluate_document(float frame) const noexcept;
+
+    void render_with_assets(
+        RenderContext& ctx,
+        float frame,
+        const LottieAssetRegistry& assets) const override;
+
+    bool hit_test(float x, float y, float frame, const LottieAssetRegistry& assets, std::string& out_hit_name) const override;
+
+    static std::shared_ptr<TextLayer> parse(const json::JsonValue& val);
+};
+
+/// @brief Pre-link parent_ptr and matte_layer_ptr across a layer list once at load time.
+void link_layer_hierarchy(std::vector<std::shared_ptr<LottieLayer>>& layers);
+
+/// @brief Full layer tree renderer with Track Mattes, Masks, Effects, BlendModes, and 3D.
+void render_layer_tree_with_assets(
+    ICanvas& canvas,
+    const std::vector<std::shared_ptr<LottieLayer>>& layers,
+    float frame,
+    const LottieAssetRegistry& assets,
+    float parent_opacity = 1.0f);
+
+/// @brief Legacy layer tree renderer overload.
 void render_layer_tree(
     ICanvas& canvas,
     const std::vector<std::shared_ptr<LottieLayer>>& layers,

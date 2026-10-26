@@ -64,10 +64,14 @@ enum class Motion : uint8_t {
     Up,
     Down,
     Home,
-    End
+    End,
+    WordLeft,
+    WordRight,
+    DocumentStart,
+    DocumentEnd
 };
 
-/// Cursor operations and interactive hit-testing.
+/// Cursor operations, visual geometry, and interactive hit-testing.
 class CursorController {
 public:
     /// Computes the closest cursor position to physical coordinates (x, y).
@@ -79,11 +83,28 @@ public:
         float origin_y = 0.0f
     );
 
-    /// Moves cursor according to Motion navigation rules.
+    /// Moves cursor according to Motion navigation rules (Grapheme Cluster & Word-aware).
     static Cursor move(
         const Buffer& buffer,
         Cursor current,
         Motion motion
+    );
+
+    /// Computes the visual caret bounding rectangle for a given cursor position.
+    static Rect cursor_rect(
+        const Buffer& buffer,
+        Cursor cursor,
+        float origin_x = 0.0f,
+        float origin_y = 0.0f,
+        float width = 2.0f
+    );
+
+    /// Computes visual selection rectangles (supporting multi-line and BiDi discontiguous runs).
+    static std::vector<Rect> selection_rects(
+        const Buffer& buffer,
+        Selection selection,
+        float origin_x = 0.0f,
+        float origin_y = 0.0f
     );
 };
 
