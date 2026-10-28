@@ -11,7 +11,10 @@
 namespace orionimg {
 
 /// Decode PNG image from memory buffer into an Image.
-ImageResult<Image> decode_png(std::span<const uint8_t> png_data);
+ImageResult<Image> decode_png(
+    std::span<const uint8_t> png_data,
+    DecodeOptions options = {}
+);
 
 /// Query PNG header information without decoding all pixel data.
 ImageResult<ImageInfo> probe_png(std::span<const uint8_t> png_data);
@@ -24,7 +27,10 @@ ImageResult<std::vector<uint8_t>> encode_png(
 );
 
 /// Helper to decode PNG from a file path.
-ImageResult<Image> decode_png_file(const std::string& file_path);
+ImageResult<Image> decode_png_file(
+    const std::string& file_path,
+    DecodeOptions options = {}
+);
 
 /// Helper to encode and save an ImageRef into a PNG file.
 bool save_png_file(

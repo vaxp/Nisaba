@@ -1,5 +1,7 @@
 #include "nisaba/markdown/document.hpp"
 #include "nisaba/markdown/parser.hpp"
+#include "nisaba/markdown/math_engine.hpp"
+#include "nisaba/markdown/diagram_engine.hpp"
 #include "nisaba/text/buffer.hpp"
 #include <fstream>
 #include <sstream>
@@ -163,6 +165,14 @@ void flatten_inlines(
             case InlineType::LineBreak:
                 out_text += '\n';
                 break;
+
+            case InlineType::Math: {
+                attr.set_style(text::Style::Italic);
+                auto m = MathEngine::parse(span.text, false);
+                out_text += m ? MathEngine::to_plain_text(*m) : span.text;
+                out_attrs.add_span(start, out_text.size(), attr);
+                break;
+            }
 
             case InlineType::Image:
                 out_text += "[Image: ";
@@ -458,6 +468,36 @@ float MarkdownDocument::layout(
                 );
                 block.layout_height = h + 4.0f;
                 current_y += block.layout_height + 4.0f;
+                break;
+            }
+
+            case BlockType::MathBlock: {
+                if (!block.math) {
+                    block.math = MathEngine::parse(block.source, true);
+                }
+                float math_size = style.base_font_size * 1.35f;
+                float h = 0.0f;
+                if (block.math) {
+                    MathEngine::layout(*block.math, math_size, true, font_system);
+                    h = block.math->height();
+                }
+                block.layout_y = current_y + style.paragraph_spacing * 0.5f;
+                block.layout_height = h + 12.0f;
+                current_y = block.layout_y + block.layout_height + style.paragraph_spacing;
+                break;
+            }
+
+            case BlockType::Diagram: {
+                if (!block.diagram) {
+                    block.diagram = DiagramEngine::parse(block.source);
+                }
+                block.layout_y = current_y;
+                float h = 0.0f;
+                if (block.diagram) {
+                    h = DiagramEngine::layout(*block.diagram, max_width, style, font_system);
+                }
+                block.layout_height = h;
+                current_y += h + style.paragraph_spacing;
                 break;
             }
 

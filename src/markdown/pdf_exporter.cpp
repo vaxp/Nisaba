@@ -1,4 +1,6 @@
 #include "nisaba/markdown/pdf_exporter.hpp"
+#include "nisaba/markdown/math_engine.hpp"
+#include "nisaba/markdown/diagram_engine.hpp"
 #include "nisaba/pdf/pdf_writer.hpp"
 #include <fstream>
 #include <sstream>
@@ -462,6 +464,29 @@ std::vector<uint8_t> MarkdownPdfExporter::export_to_bytes(
                     cur_y += line_h;
                 }
                 cur_y += 6.0f;
+                break;
+            }
+
+            case BlockType::MathBlock: {
+                if (block.math) {
+                    float mh = block.layout_height > 0.0f ? block.layout_height : block.math->height() + 12.0f;
+                    ensure_space(mh);
+                    float mx = margin_l + (content_w - block.math->width) * 0.5f;
+                    MathEngine::render(cur_page->canvas(), *block.math, mx, cur_y + 6.0f,
+                                       style.text_color, font_system, glyph_cache);
+                    cur_y += mh + style.paragraph_spacing;
+                }
+                break;
+            }
+
+            case BlockType::Diagram: {
+                if (block.diagram) {
+                    float dh = block.diagram->height;
+                    ensure_space(dh);
+                    DiagramEngine::render(cur_page->canvas(), *block.diagram, margin_l, cur_y,
+                                          content_w, style, font_system, glyph_cache);
+                    cur_y += dh + style.paragraph_spacing;
+                }
                 break;
             }
 

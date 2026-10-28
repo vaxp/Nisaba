@@ -11,7 +11,10 @@
 namespace orionimg {
 
 /// Decode QOI (Quite OK Image) image from memory buffer into an Image.
-ImageResult<Image> decode_qoi(std::span<const uint8_t> qoi_data);
+ImageResult<Image> decode_qoi(
+    std::span<const uint8_t> qoi_data,
+    DecodeOptions options = {}
+);
 
 /// Query QOI header information without decoding all pixel data.
 ImageResult<ImageInfo> probe_qoi(std::span<const uint8_t> qoi_data);
@@ -24,7 +27,10 @@ ImageResult<std::vector<uint8_t>> encode_qoi(
 );
 
 /// Helper to decode QOI from a file path.
-ImageResult<Image> decode_qoi_file(const std::string& file_path);
+ImageResult<Image> decode_qoi_file(
+    const std::string& file_path,
+    DecodeOptions options = {}
+);
 
 /// Helper to encode and save an ImageRef into a QOI file.
 bool save_qoi_file(

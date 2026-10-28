@@ -10,6 +10,9 @@
 #include "nisaba/image/jpeg.hpp"
 #include "nisaba/image/qoi.hpp"
 #include "nisaba/image/webp.hpp"
+#include "nisaba/image/bmp.hpp"
+#include "nisaba/image/ppm.hpp"
+#include "nisaba/image/hdr.hpp"
 #include "nisaba/canvas/pixmap.hpp"
 
 namespace nisaba::image {
@@ -18,10 +21,16 @@ namespace nisaba::image {
 ImageFormat detect_format(std::span<const uint8_t> data) noexcept;
 
 /// Automatically identify format and decode image from memory.
-ImageResult<Pixmap> load_image_from_memory(std::span<const uint8_t> data);
+ImageResult<Pixmap> load_image_from_memory(
+    std::span<const uint8_t> data,
+    DecodeOptions options = {}
+);
 
 /// Automatically identify format and decode image from file path.
-ImageResult<Pixmap> load_image_file(const std::string& path);
+ImageResult<Pixmap> load_image_file(
+    const std::string& path,
+    DecodeOptions options = {}
+);
 
 /// Query image header/dimensions without full decode.
 ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data);
@@ -29,7 +38,7 @@ ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data);
 /// Query image header/dimensions from file.
 ImageResult<ImageInfo> probe_image_file(const std::string& path);
 
-/// Automatically save image by inspecting file extension (.png, .jpg, .jpeg, .bmp).
+/// Automatically save image by inspecting file extension (.png, .jpg, .jpeg, .bmp, .ppm, .pgm, .hdr, .qoi, .webp).
 bool save_image_file(
     PixmapRef pixmap,
     const std::string& path,

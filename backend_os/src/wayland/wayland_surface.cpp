@@ -224,6 +224,30 @@ void WaylandLayerSurface::setKeyboardMode(KeyboardMode mode) {
     }
 }
 
+void WaylandLayerSurface::setInputRegion(const std::vector<RegionRect>& rects) {
+    auto* compositor = backend_.getCompositor();
+    if (!compositor || !wl_surface_) return;
+
+    struct wl_region* region = wl_compositor_create_region(compositor);
+    if (!region) return;
+
+    for (const auto& r : rects) {
+        if (r.width > 0 && r.height > 0) {
+            wl_region_add(region, r.x, r.y, r.width, r.height);
+        }
+    }
+
+    wl_surface_set_input_region(wl_surface_, region);
+    wl_region_destroy(region);
+    wl_surface_commit(wl_surface_);
+}
+
+void WaylandLayerSurface::resetInputRegion() {
+    if (!wl_surface_) return;
+    wl_surface_set_input_region(wl_surface_, nullptr);
+    wl_surface_commit(wl_surface_);
+}
+
 Size WaylandLayerSurface::getSize() const {
     return Size{static_cast<float>(current_width_), static_cast<float>(current_height_)};
 }

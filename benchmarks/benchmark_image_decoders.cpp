@@ -92,8 +92,11 @@ BenchmarkResult run_benchmark(const std::string& file_path, int iterations = 50)
         switch (probe->format) {
             case nisaba::image::ImageFormat::PNG: res.format = "PNG"; break;
             case nisaba::image::ImageFormat::JPEG: res.format = "JPEG"; break;
+            case nisaba::image::ImageFormat::WebP: res.format = "WebP"; break;
             case nisaba::image::ImageFormat::QOI: res.format = "QOI"; break;
             case nisaba::image::ImageFormat::BMP: res.format = "BMP"; break;
+            case nisaba::image::ImageFormat::PPM: res.format = "PPM"; break;
+            case nisaba::image::ImageFormat::HDR: res.format = "HDR"; break;
             default: res.format = "Unknown"; break;
         }
     } else {
@@ -321,11 +324,28 @@ int main(int argc, char** argv) {
     std::cout << "  Nisaba Image Engine vs stb_image: Performance & Fidelity Benchmark \n";
     std::cout << "======================================================================\n";
 
+    // Auto-generate showcase formats if needed
+    std::string showcase_src = std::filesystem::exists("showcase/showcase_vaxp.png") ? "showcase/showcase_vaxp.png" : "../showcase/showcase_vaxp.png";
+    if (std::filesystem::exists(showcase_src)) {
+        auto base = nisaba::Pixmap::load_png(showcase_src);
+        if (base) {
+            std::string dir = std::filesystem::path(showcase_src).parent_path().string();
+            base->save_image(dir + "/showcase_vaxp.bmp");
+            base->save_image(dir + "/showcase_vaxp.ppm");
+            base->save_image(dir + "/showcase_vaxp.hdr");
+        }
+    }
+
     std::vector<std::string> test_files = {
         "assets/vaxp.png",
         "showcase/showcase_vaxp.png",
         "showcase/showcase_vaxp.jpg",
+        "showcase/showcase_vaxp.bmp",
+        "showcase/showcase_vaxp.ppm",
+        "showcase/showcase_vaxp.hdr",
         "showcase/showcase_vaxp.qoi",
+        "assets/sample.webp",
+        "assets/sample_lossless.webp",
         "showcase/nisaba_gpu_showcase.png"
     };
 

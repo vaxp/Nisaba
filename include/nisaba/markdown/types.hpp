@@ -11,6 +11,9 @@
 
 namespace nisaba::markdown {
 
+struct MathNode;      // Defined in math_engine.hpp
+struct DiagramModel;  // Defined in diagram_engine.hpp
+
 /// Alignment of table columns in GitHub Flavored Markdown (GFM).
 enum class TableAlign : uint8_t {
     None,
@@ -36,7 +39,8 @@ enum class InlineType : uint8_t {
     Highlight,    // <mark> tag
     Emoji,        // GitHub Emoji (:smile:, :rocket:, etc.)
     FootnoteRef,  // Footnote reference [^1]
-    LineBreak     // Hard line break (<br> or two trailing spaces)
+    LineBreak,    // Hard line break (<br> or two trailing spaces)
+    Math          // Inline LaTeX math: $E = mc^2$ (source in `text`)
 };
 
 /// Inline formatting span within a paragraph, heading, or table cell.
@@ -113,6 +117,9 @@ struct InlineSpan {
     static InlineSpan make_linebreak() {
         return InlineSpan(InlineType::LineBreak, "\n");
     }
+    static InlineSpan make_math(std::string latex) {
+        return InlineSpan(InlineType::Math, std::move(latex));
+    }
 };
 
 /// GitHub Callout Alert types: > [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION]
@@ -139,7 +146,9 @@ enum class BlockType : uint8_t {
     Alert,       // GitHub callout alert block
     Details,     // <details><summary>...</summary>...</details>
     HtmlBlock,   // Block-level HTML container (e.g. <div align="...">)
-    FootnoteDef  // Footnote definition block: [^1]: Content
+    FootnoteDef, // Footnote definition block: [^1]: Content
+    MathBlock,   // Display LaTeX math: $$ ... $$ or ```math
+    Diagram      // Mermaid diagram / chart: ```mermaid
 };
 
 /// Single cell in a markdown table.
@@ -191,6 +200,11 @@ struct BlockNode {
     // Table data
     std::vector<TableAlign> table_alignments{};
     std::vector<TableRow> table_rows{};
+
+    // Math & Diagram blocks (parsed lazily during layout)
+    std::string source{};                          // Raw LaTeX or Mermaid source
+    std::shared_ptr<MathNode> math{};
+    std::shared_ptr<DiagramModel> diagram{};
 
     // Layout metrics (computed during layout pass)
     float layout_x{0.0f};

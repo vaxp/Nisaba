@@ -1,5 +1,7 @@
 #include "nisaba/markdown/renderer.hpp"
 #include "nisaba/markdown/syntax_highlighter.hpp"
+#include "nisaba/markdown/math_engine.hpp"
+#include "nisaba/markdown/diagram_engine.hpp"
 #include "nisaba/path/path_builder.hpp"
 #include "nisaba/text/buffer.hpp"
 #include <algorithm>
@@ -175,6 +177,14 @@ void render_inlines_to_canvas(
             case InlineType::LineBreak:
                 text += '\n';
                 break;
+
+            case InlineType::Math: {
+                attr.set_style(text::Style::Italic);
+                auto m = MathEngine::parse(span.text, false);
+                text += m ? MathEngine::to_plain_text(*m) : span.text;
+                attrs.add_span(start, text.size(), attr);
+                break;
+            }
 
             case InlineType::Image:
                 text += "[Image: ";
@@ -640,6 +650,22 @@ void MarkdownRenderer::render(
                     style.footnote_font_size, style.line_height_multiplier,
                     style.footnote_text_color, style, font_system, glyph_cache
                 );
+                break;
+            }
+
+            case BlockType::MathBlock: {
+                if (block.math) {
+                    float mx = x + (width - block.math->width) * 0.5f;
+                    float my = block_top + 6.0f;
+                    MathEngine::render(canvas, *block.math, mx, my, style.text_color, font_system, glyph_cache);
+                }
+                break;
+            }
+
+            case BlockType::Diagram: {
+                if (block.diagram) {
+                    DiagramEngine::render(canvas, *block.diagram, x, block_top, width, style, font_system, glyph_cache);
+                }
                 break;
             }
 

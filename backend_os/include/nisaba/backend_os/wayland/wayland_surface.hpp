@@ -24,7 +24,9 @@ public:
     void setExclusiveZone(int32_t zone) override;
     void setMargin(const SurfaceMargin& margin) override;
     void setKeyboardMode(KeyboardMode mode) override;
-
+    void setInputRegion(const std::vector<RegionRect>& rects) override;
+    void resetInputRegion() override;
+    
     [[nodiscard]] Size getSize() const override;
     [[nodiscard]] Size getDrawableSize() const override;
     [[nodiscard]] float getDpiScale() const override;

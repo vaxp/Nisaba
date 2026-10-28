@@ -506,6 +506,34 @@ std::vector<InlineSpan> MarkdownParser::parse_inlines(
             }
         }
 
+        // 2b. Inline LaTeX Math: $...$ or $$...$$ (rejects currency like "$5 and $6")
+        if (c == '$') {
+            size_t open_len = (i + 1 < len && text[i + 1] == '$') ? 2 : 1;
+            size_t content_start = i + open_len;
+            if (content_start < len && !std::isspace(static_cast<unsigned char>(text[content_start]))) {
+                size_t close = std::string_view::npos;
+                for (size_t k = content_start; k < len; ++k) {
+                    if (text[k] == '\\') { k++; continue; }
+                    if (text[k] == '$' && (open_len == 1 || (k + 1 < len && text[k + 1] == '$'))) {
+                        close = k;
+                        break;
+                    }
+                }
+                if (close != std::string_view::npos && close > content_start) {
+                    bool space_before_close = std::isspace(static_cast<unsigned char>(text[close - 1])) != 0;
+                    size_t after = close + open_len;
+                    bool digit_after = after < len && std::isdigit(static_cast<unsigned char>(text[after]));
+                    if (!space_before_close && !(open_len == 1 && digit_after)) {
+                        flush_text(i);
+                        spans.push_back(InlineSpan::make_math(std::string(text.substr(content_start, close - content_start))));
+                        i = close + open_len;
+                        text_start = i;
+                        continue;
+                    }
+                }
+            }
+        }
+
         // 3. Inline Code: `code`
         if (c == '`') {
             size_t code_end = text.find('`', i + 1);
@@ -757,7 +785,52 @@ std::shared_ptr<BlockNode> MarkdownParser::parse(std::string_view markdown) {
                 code_block->code_lines.push_back(std::string(code_line));
                 line_idx++;
             }
+
+            // Sovereign live blocks: ```mermaid and ```math / ```latex / ```tex
+            std::string lang_lower = to_lower(lang);
+            if (lang_lower == "mermaid" || lang_lower == "math" || lang_lower == "latex" || lang_lower == "tex") {
+                std::string src;
+                for (const auto& cl : code_block->code_lines) {
+                    src += cl;
+                    src += '\n';
+                }
+                code_block->type = (lang_lower == "mermaid") ? BlockType::Diagram : BlockType::MathBlock;
+                code_block->source = std::move(src);
+            }
             root->children.push_back(std::move(code_block));
+            continue;
+        }
+
+        // 2b. Display Math Block: $$ ... $$ (single-line or multi-line)
+        if (trimmed.starts_with("$$")) {
+            std::string src;
+            auto after_open = trim(trimmed.substr(2));
+            size_t close_same = after_open.find("$$");
+            if (close_same != std::string_view::npos) {
+                src = std::string(trim(after_open.substr(0, close_same)));
+                line_idx++;
+            } else {
+                if (!after_open.empty()) {
+                    src += std::string(after_open);
+                    src += '\n';
+                }
+                line_idx++;
+                while (line_idx < num_lines) {
+                    auto ml = trim(lines[line_idx]);
+                    size_t close_pos = ml.find("$$");
+                    if (close_pos != std::string_view::npos) {
+                        src += std::string(ml.substr(0, close_pos));
+                        line_idx++;
+                        break;
+                    }
+                    src += std::string(ml);
+                    src += '\n';
+                    line_idx++;
+                }
+            }
+            auto math_node = std::make_shared<BlockNode>(BlockType::MathBlock);
+            math_node->source = std::move(src);
+            root->children.push_back(std::move(math_node));
             continue;
         }
 
@@ -1087,6 +1160,7 @@ std::shared_ptr<BlockNode> MarkdownParser::parse(std::string_view markdown) {
             if (p_line.empty()) break;
 
             if (p_line.starts_with("```") || p_line.starts_with("~~~") ||
+                p_line.starts_with("$$") ||
                 is_thematic_break(lines[line_idx]) ||
                 parse_heading_level(lines[line_idx], heading_text) > 0 ||
                 p_line.starts_with(">") ||

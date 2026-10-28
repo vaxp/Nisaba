@@ -11,7 +11,10 @@
 namespace nisaba::image {
 
 /// Decode PNG image from memory buffer into a Nisaba Pixmap.
-ImageResult<Pixmap> decode_png(std::span<const uint8_t> png_data);
+ImageResult<Pixmap> decode_png(
+    std::span<const uint8_t> png_data,
+    DecodeOptions options = {}
+);
 
 /// Query PNG header information without decoding all pixel data.
 ImageResult<ImageInfo> probe_png(std::span<const uint8_t> png_data);
@@ -24,7 +27,10 @@ ImageResult<std::vector<uint8_t>> encode_png(
 );
 
 /// Helper to decode PNG from a file path.
-ImageResult<Pixmap> decode_png_file(const std::string& file_path);
+ImageResult<Pixmap> decode_png_file(
+    const std::string& file_path,
+    DecodeOptions options = {}
+);
 
 /// Helper to encode and save a PixmapRef into a PNG file.
 bool save_png_file(

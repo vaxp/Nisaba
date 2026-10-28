@@ -350,6 +350,90 @@ void test_webp_animation_decoding() {
     std::cout << "PASSED (2 frames, 60x40, 300ms total)\n";
 }
 
+void test_webp_real_world_lossy() {
+    std::cout << "[TEST] Real-world Lossy WebP decoding (sample.webp)... ";
+    std::string path = "assets/sample.webp";
+    auto info = probe_image_file(path);
+    if (!info) {
+        path = "../assets/sample.webp";
+        info = probe_image_file(path);
+    }
+    if (!info) {
+        std::cout << "SKIPPED (asset not found)\n";
+        return;
+    }
+    assert(info->width == 550);
+    assert(info->height == 368);
+    assert(info->format == ImageFormat::WebP);
+
+    auto img = decode_webp_file(path);
+    assert(img.has_value());
+    assert(img->width() == 550);
+    assert(img->height() == 368);
+
+    // Verify top-left sky blue pixel from sample.webp
+    auto p0 = img->pixel(0, 0).value();
+    assert(p0.r == 118);
+    assert(p0.g == 181);
+    assert(p0.b == 241);
+
+    std::cout << "PASSED (" << img->width() << "x" << img->height() << ", VP8 decoded successfully)\n";
+}
+
+void test_webp_lossy_roundtrip() {
+    std::cout << "[TEST] Lossy WebP encoding and decoding roundtrip... ";
+
+    uint32_t w = 64;
+    uint32_t h = 64;
+    auto maybe_pixmap = Pixmap::allocate(w, h);
+    assert(maybe_pixmap.has_value());
+    Pixmap& pixmap = *maybe_pixmap;
+
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            uint8_t r = static_cast<uint8_t>(x * 4);
+            uint8_t g = static_cast<uint8_t>(y * 4);
+            uint8_t b = static_cast<uint8_t>((x + y) * 2);
+            pixmap.set_pixel(x, y, ColorU8(r, g, b, 255).premultiply());
+        }
+    }
+
+    // 1. Encode with lossy VP8
+    auto enc = encode_webp(pixmap.as_ref(), false, 80);
+    assert(enc.has_value());
+    assert(!enc->empty());
+
+    // 2. Probe
+    auto info = probe_webp(*enc);
+    assert(info.has_value());
+    assert(info->width == w);
+    assert(info->height == h);
+
+    // 3. Decode
+    auto dec = decode_webp(*enc);
+    assert(dec.has_value());
+    assert(dec->width() == w);
+    assert(dec->height() == h);
+
+    // 4. Measure PSNR
+    double mse = 0.0;
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            auto orig = pixmap.pixel(x, y)->demultiply();
+            auto d = dec->pixel(x, y)->demultiply();
+            double dr = static_cast<double>(orig.red()) - d.red();
+            double dg = static_cast<double>(orig.green()) - d.green();
+            double db = static_cast<double>(orig.blue()) - d.blue();
+            mse += (dr * dr + dg * dg + db * db) / 3.0;
+        }
+    }
+    mse /= (w * h);
+    double psnr = 10.0 * std::log10((255.0 * 255.0) / (mse > 1e-6 ? mse : 1e-6));
+    assert(psnr > 28.0);
+
+    std::cout << "PASSED (PSNR: " << psnr << " dB)\n";
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "Nisaba Sovereign WebP Codec Test Suite\n";
@@ -362,6 +446,8 @@ int main() {
     test_webp_arbitrary_dimensions();
     test_webp_vp8x_extended_probe();
     test_webp_real_world_lossless();
+    test_webp_real_world_lossy();
+    test_webp_lossy_roundtrip();
     test_webp_animation_decoding();
 
     std::cout << "========================================\n";

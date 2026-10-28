@@ -12,6 +12,9 @@
 #include "orion/orionimg/jpeg.hpp"
 #include "orion/orionimg/qoi.hpp"
 #include "orion/orionimg/webp.hpp"
+#include "orion/orionimg/bmp.hpp"
+#include "orion/orionimg/ppm.hpp"
+#include "orion/orionimg/hdr.hpp"
 
 namespace orionimg {
 
@@ -19,10 +22,16 @@ namespace orionimg {
 ImageFormat detect_format(std::span<const uint8_t> data) noexcept;
 
 /// Automatically identify format and decode image from memory.
-ImageResult<Image> load_image_from_memory(std::span<const uint8_t> data);
+ImageResult<Image> load_image_from_memory(
+    std::span<const uint8_t> data,
+    DecodeOptions options = {}
+);
 
 /// Automatically identify format and decode image from file path.
-ImageResult<Image> load_image_file(const std::string& path);
+ImageResult<Image> load_image_file(
+    const std::string& path,
+    DecodeOptions options = {}
+);
 
 /// Query image header/dimensions without full decode.
 ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data);
@@ -30,7 +39,7 @@ ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data);
 /// Query image header/dimensions from file.
 ImageResult<ImageInfo> probe_image_file(const std::string& path);
 
-/// Automatically save image by inspecting file extension (.png, .jpg, .jpeg, .bmp, .ppm, .qoi, .webp).
+/// Automatically save image by inspecting file extension (.png, .jpg, .jpeg, .bmp, .ppm, .pgm, .hdr, .qoi, .webp).
 bool save_image_file(
     ImageRef image,
     const std::string& path,

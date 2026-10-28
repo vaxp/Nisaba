@@ -8,6 +8,8 @@
 #include "nisaba/markdown/html_parser.hpp"
 #include "nisaba/markdown/syntax_highlighter.hpp"
 #include "nisaba/markdown/parser.hpp"
+#include "nisaba/markdown/math_engine.hpp"
+#include "nisaba/markdown/diagram_engine.hpp"
 #include "nisaba/markdown/document.hpp"
 #include "nisaba/markdown/renderer.hpp"
 #include "nisaba/markdown/pdf_exporter.hpp"

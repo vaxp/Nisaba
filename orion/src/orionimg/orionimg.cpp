@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <array>
 
 namespace orionimg {
 
@@ -12,10 +13,20 @@ ImageFormat detect_format(std::span<const uint8_t> data) noexcept {
             return ImageFormat::WebP;
         }
     }
+    if (data.size() >= 10) {
+        if (std::memcmp(data.data(), "#?RADIANCE", 10) == 0) {
+            return ImageFormat::HDR;
+        }
+    }
     if (data.size() >= 8) {
         constexpr uint8_t PNG_MAGIC[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
         if (std::memcmp(data.data(), PNG_MAGIC, 8) == 0) {
             return ImageFormat::PNG;
+        }
+    }
+    if (data.size() >= 6) {
+        if (std::memcmp(data.data(), "#?RGBE", 6) == 0) {
+            return ImageFormat::HDR;
         }
     }
     if (data.size() >= 4) {
@@ -31,30 +42,37 @@ ImageFormat detect_format(std::span<const uint8_t> data) noexcept {
         if (data[0] == 'B' && data[1] == 'M') {
             return ImageFormat::BMP;
         }
-        if (data[0] == 'P' && (data[1] == '6' || data[1] == '3')) {
+        if (data[0] == 'P' &&
+            (data[1] == '2' || data[1] == '3' || data[1] == '5' || data[1] == '6' || data[1] == '7')) {
             return ImageFormat::PPM;
         }
     }
     return ImageFormat::Unknown;
 }
 
-ImageResult<Image> load_image_from_memory(std::span<const uint8_t> data) {
+ImageResult<Image> load_image_from_memory(std::span<const uint8_t> data, DecodeOptions options) {
     ImageFormat fmt = detect_format(data);
     switch (fmt) {
         case ImageFormat::PNG:
-            return decode_png(data);
+            return decode_png(data, options);
         case ImageFormat::JPEG:
-            return decode_jpeg(data);
+            return decode_jpeg(data, options);
         case ImageFormat::QOI:
-            return decode_qoi(data);
+            return decode_qoi(data, options);
         case ImageFormat::WebP:
-            return decode_webp(data);
+            return decode_webp(data, options);
+        case ImageFormat::BMP:
+            return decode_bmp(data, options);
+        case ImageFormat::PPM:
+            return decode_ppm(data, options);
+        case ImageFormat::HDR:
+            return decode_hdr(data, options);
         default:
             return ImageResult<Image>::fail(ImageError::UnsupportedFormat);
     }
 }
 
-ImageResult<Image> load_image_file(const std::string& path) {
+ImageResult<Image> load_image_file(const std::string& path, DecodeOptions options) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         return ImageResult<Image>::fail(ImageError::IOError);
@@ -71,7 +89,7 @@ ImageResult<Image> load_image_file(const std::string& path) {
         return ImageResult<Image>::fail(ImageError::IOError);
     }
 
-    return load_image_from_memory(buffer);
+    return load_image_from_memory(buffer, options);
 }
 
 ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data) {
@@ -85,6 +103,12 @@ ImageResult<ImageInfo> probe_image_from_memory(std::span<const uint8_t> data) {
             return probe_qoi(data);
         case ImageFormat::WebP:
             return probe_webp(data);
+        case ImageFormat::BMP:
+            return probe_bmp(data);
+        case ImageFormat::PPM:
+            return probe_ppm(data);
+        case ImageFormat::HDR:
+            return probe_hdr(data);
         default:
             return ImageResult<ImageInfo>::fail(ImageError::UnsupportedFormat);
     }
@@ -111,7 +135,6 @@ bool save_image_file(
     const std::string& path,
     int quality_or_compression
 ) {
-    // Determine format by file extension
     auto dot_pos = path.rfind('.');
     if (dot_pos == std::string::npos) {
         return save_png_file(pixmap, path, quality_or_compression);
@@ -129,11 +152,13 @@ bool save_image_file(
     } else if (ext == "qoi") {
         return save_qoi_file(pixmap, path);
     } else if (ext == "webp") {
-        return save_webp_file(pixmap, path);
+        return save_webp_file(pixmap, path, true, quality_or_compression);
     } else if (ext == "bmp") {
-        return pixmap.save_bmp(path);
-    } else if (ext == "ppm") {
-        return pixmap.save_ppm(path);
+        return save_bmp_file(pixmap, path);
+    } else if (ext == "ppm" || ext == "pgm" || ext == "pam") {
+        return save_ppm_file(pixmap, path);
+    } else if (ext == "hdr") {
+        return save_hdr_file(pixmap, path);
     }
 
     return save_png_file(pixmap, path, quality_or_compression);

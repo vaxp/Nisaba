@@ -85,9 +85,78 @@ void test_jpeg_roundtrip() {
     std::cout << "PASSED (PSNR: " << psnr << " dB, Encoded Size: " << encoded->size() << " bytes)\n";
 }
 
+void test_progressive_jpeg_roundtrip() {
+    std::cout << "[TEST] Progressive JPEG (SOF2) encoding and decoding roundtrip... ";
+
+    uint32_t w = 80;
+    uint32_t h = 80;
+    auto maybe_pixmap = Pixmap::allocate(w, h);
+    assert(maybe_pixmap.has_value());
+    Pixmap& pixmap = *maybe_pixmap;
+
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            uint8_t r = static_cast<uint8_t>((x * 255) / w);
+            uint8_t g = static_cast<uint8_t>((y * 255) / h);
+            uint8_t b = static_cast<uint8_t>((x + y) * 255 / (w + h));
+            pixmap.set_pixel(x, y, ColorU8(r, g, b, 255).premultiply());
+        }
+    }
+
+    // 1. Encode with progressive = true
+    auto enc = encode_jpeg(pixmap.as_ref(), 85, true);
+    assert(enc.has_value());
+    assert(!enc->empty());
+
+    // 2. Probe header and confirm is_progressive == true
+    auto info = probe_jpeg(*enc);
+    assert(info.has_value());
+    assert(info->width == w);
+    assert(info->height == h);
+    assert(info->format == ImageFormat::JPEG);
+    assert(info->is_progressive == true);
+
+    // 3. Decode back with SOF2 progressive decoder
+    auto dec = decode_jpeg(*enc);
+    assert(dec.has_value());
+    assert(dec->width() == w);
+    assert(dec->height() == h);
+
+    // 4. Measure PSNR
+    double mse = 0.0;
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            auto orig = pixmap.pixel(x, y)->demultiply();
+            auto d = dec->pixel(x, y)->demultiply();
+            double dr = static_cast<double>(orig.red()) - d.red();
+            double dg = static_cast<double>(orig.green()) - d.green();
+            double db = static_cast<double>(orig.blue()) - d.blue();
+            mse += (dr * dr + dg * dg + db * db) / 3.0;
+        }
+    }
+    mse /= (w * h);
+    double psnr = 10.0 * std::log10((255.0 * 255.0) / (mse > 1e-6 ? mse : 1e-6));
+    std::cout << "[DEBUG] Progressive MSE: " << mse << ", PSNR: " << psnr << "\n";
+    auto o0 = pixmap.pixel(0, 0)->demultiply();
+    auto d0 = dec->pixel(0, 0)->demultiply();
+    std::cout << "[DEBUG] (0,0) Orig RGB: " << (int)o0.red() << "," << (int)o0.green() << "," << (int)o0.blue()
+              << " | Dec RGB: " << (int)d0.red() << "," << (int)d0.green() << "," << (int)d0.blue() << "\n";
+    assert(psnr > 35.0);
+
+    // 5. Decode with DecodeOptions (premultiply_alpha = false)
+    DecodeOptions opts;
+    opts.premultiply_alpha = false;
+    auto dec_unprem = decode_jpeg(*enc, opts);
+    assert(dec_unprem.has_value());
+    assert(dec_unprem->width() == w);
+
+    std::cout << "PASSED (PSNR: " << psnr << " dB, Progressive SOF2 verified)\n";
+}
+
 int main() {
     std::cout << "=== Running Nisaba Sovereign JPEG Tests ===\n";
     test_jpeg_roundtrip();
+    test_progressive_jpeg_roundtrip();
     std::cout << "=== All JPEG Tests Passed! ===\n";
     return 0;
 }

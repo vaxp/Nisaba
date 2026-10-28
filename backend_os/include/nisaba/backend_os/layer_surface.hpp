@@ -11,6 +11,7 @@
 #include "nisaba/backend_os/output.hpp"
 #include <string>
 #include <memory>
+#include <vector>
 #include <cstdint>
 
 // Undefine X11 macros that pollute global namespace and clash with our enums
@@ -107,6 +108,23 @@ public:
     virtual void setExclusiveZone(int32_t zone) = 0;
     virtual void setMargin(const SurfaceMargin& margin) = 0;
     virtual void setKeyboardMode(KeyboardMode mode) = 0;
+
+        /// 2D rectangle for defining input mask regions
+    struct RegionRect {
+        int32_t x = 0;
+        int32_t y = 0;
+        int32_t width = 0;
+        int32_t height = 0;
+    };
+
+    /// Sets the Wayland input region mask.
+    /// Only areas within these rectangles will intercept pointer/mouse clicks.
+    /// Empty areas outside these rectangles pass clicks through to windows underneath.
+    /// If rects is empty, the entire surface becomes click-through!
+    virtual void setInputRegion(const std::vector<RegionRect>& rects) = 0;
+
+    /// Resets the input region to cover the entire surface bounding box.
+    virtual void resetInputRegion() = 0;
 
     [[nodiscard]] virtual Size getSize() const = 0;
     [[nodiscard]] virtual Size getDrawableSize() const = 0;

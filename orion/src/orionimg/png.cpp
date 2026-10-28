@@ -241,6 +241,40 @@ void unfilter_scanline(
     }
 }
 
+Image apply_png_exif_orientation(const Image& src, uint8_t orientation) {
+    if (orientation <= 1 || orientation > 8) return src;
+    uint32_t w = src.width();
+    uint32_t h = src.height();
+    bool swap_dims = (orientation >= 5 && orientation <= 8);
+    uint32_t dst_w = swap_dims ? h : w;
+    uint32_t dst_h = swap_dims ? w : h;
+
+    auto maybe_dst = Image::allocate(dst_w, dst_h, src.format());
+    if (!maybe_dst.has_value()) return src;
+    Image dst = std::move(*maybe_dst);
+
+    const PremultipliedColorU8* sp = src.pixels();
+    PremultipliedColorU8* dp = dst.pixels_mut();
+
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            uint32_t dx = x, dy = y;
+            switch (orientation) {
+                case 2: dx = w - 1 - x; dy = y; break;
+                case 3: dx = w - 1 - x; dy = h - 1 - y; break;
+                case 4: dx = x; dy = h - 1 - y; break;
+                case 5: dx = y; dy = x; break;
+                case 6: dx = h - 1 - y; dy = x; break;
+                case 7: dx = h - 1 - y; dy = w - 1 - x; break;
+                case 8: dx = y; dy = w - 1 - x; break;
+                default: break;
+            }
+            dp[dy * dst_w + dx] = sp[y * w + x];
+        }
+    }
+    return dst;
+}
+
 } // namespace
 
 ImageResult<ImageInfo> probe_png(std::span<const uint8_t> png_data) {
@@ -263,6 +297,7 @@ ImageResult<ImageInfo> probe_png(std::span<const uint8_t> png_data) {
     info.bit_depth = ihdr[8];
     uint8_t color_type = ihdr[9];
     info.format = ImageFormat::PNG;
+    info.is_progressive = (ihdr[12] == 1);
 
     switch (color_type) {
         case 0: // Grayscale
@@ -294,10 +329,29 @@ ImageResult<ImageInfo> probe_png(std::span<const uint8_t> png_data) {
             return ImageResult<ImageInfo>::fail(ImageError::UnsupportedFormat);
     }
 
+    // Scan ancillary chunks before IDAT for tRNS / eXIf
+    size_t offset = 8;
+    while (offset + 8 <= png_data.size()) {
+        uint32_t clen = read_u32_be(png_data.data() + offset);
+        const uint8_t* ctype = png_data.data() + offset + 4;
+        offset += 8;
+        if (offset + clen + 4 > png_data.size()) break;
+        const uint8_t* cdata = png_data.data() + offset;
+
+        if (std::memcmp(ctype, "tRNS", 4) == 0 && clen > 0) {
+            info.has_alpha = true;
+        } else if (std::memcmp(ctype, "eXIf", 4) == 0 && clen >= 8) {
+            info.exif_orientation = parse_exif_orientation(std::span<const uint8_t>(cdata, clen));
+        } else if (std::memcmp(ctype, "IDAT", 4) == 0 || std::memcmp(ctype, "IEND", 4) == 0) {
+            break;
+        }
+        offset += clen + 4;
+    }
+
     return ImageResult<ImageInfo>::success(info);
 }
 
-ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
+ImageResult<Image> decode_png(std::span<const uint8_t> png_data, DecodeOptions options) {
     if (png_data.size() < 8 || std::memcmp(png_data.data(), PNG_SIGNATURE, 8) != 0) {
         return ImageResult<Image>::fail(ImageError::InvalidSignature);
     }
@@ -308,6 +362,7 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
     std::vector<uint8_t> idat_data;
     std::vector<uint8_t> palette;
     std::vector<uint8_t> trns;
+    uint8_t exif_orientation = 1;
 
     while (offset + 8 <= png_data.size()) {
         uint32_t chunk_len = read_u32_be(png_data.data() + offset);
@@ -334,6 +389,8 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
             palette.assign(data, data + chunk_len);
         } else if (std::memcmp(type, "tRNS", 4) == 0) {
             trns.assign(data, data + chunk_len);
+        } else if (std::memcmp(type, "eXIf", 4) == 0 && chunk_len >= 8) {
+            exif_orientation = parse_exif_orientation(std::span<const uint8_t>(data, chunk_len));
         } else if (std::memcmp(type, "IDAT", 4) == 0) {
             idat_data.insert(idat_data.end(), data, data + chunk_len);
         } else if (std::memcmp(type, "IEND", 4) == 0) {
@@ -400,23 +457,30 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
                 return ColorU8(px[0], px[1], px[2], a);
             } else if (ihdr.bit_depth == 16) {
                 const uint8_t* px = line + x * 6;
-                return ColorU8(px[0], px[2], px[4], 255);
+                uint8_t a = 255;
+                if (trns.size() >= 6 &&
+                    px[0] == trns[0] && px[1] == trns[1] &&
+                    px[2] == trns[2] && px[3] == trns[3] &&
+                    px[4] == trns[4] && px[5] == trns[5]) {
+                    a = 0;
+                }
+                return ColorU8(px[0], px[2], px[4], a);
             }
         } else if (ihdr.color_type == 0) { // Grayscale
             uint8_t y = 0;
+            uint8_t a = 255;
             if (ihdr.bit_depth == 8) {
                 y = line[x];
+                if (trns.size() >= 2 && y == trns[1]) a = 0;
             } else if (ihdr.bit_depth == 16) {
                 y = line[x * 2];
+                if (trns.size() >= 2 && line[x * 2] == trns[0] && line[x * 2 + 1] == trns[1]) a = 0;
             } else { // 1, 2, 4 bits
                 int shift = (8 - ihdr.bit_depth) - (x % (8 / ihdr.bit_depth)) * ihdr.bit_depth;
                 uint8_t mask = (1 << ihdr.bit_depth) - 1;
                 uint8_t raw = (line[x / (8 / ihdr.bit_depth)] >> shift) & mask;
+                if (trns.size() >= 2 && raw == trns[1]) a = 0;
                 y = static_cast<uint8_t>(raw * (255 / mask));
-            }
-            uint8_t a = 255;
-            if (trns.size() >= 2 && y == trns[1]) {
-                a = 0;
             }
             return ColorU8(y, y, y, a);
         } else if (ihdr.color_type == 4) { // Grayscale + Alpha
@@ -447,6 +511,13 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
         return ColorU8(0, 0, 0, 0);
     };
 
+    auto to_dst_pixel = [&](ColorU8 c) -> PremultipliedColorU8 {
+        if (options.premultiply_alpha) {
+            return c.premultiply();
+        }
+        return PremultipliedColorU8::from_rgba_unchecked(c.r, c.g, c.b, c.a);
+    };
+
     // Pre-calculate palette lookup table for indexed images
     std::array<PremultipliedColorU8, 256> palette_lut{};
     if (ihdr.color_type == 3) {
@@ -457,13 +528,7 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
                 uint8_t g = palette[i * 3 + 1];
                 uint8_t b = palette[i * 3 + 2];
                 uint8_t a = (i < trns.size()) ? trns[i] : 255;
-                if (a == 255) {
-                    palette_lut[i] = PremultipliedColorU8(r, g, b, 255);
-                } else if (a == 0) {
-                    palette_lut[i] = PremultipliedColorU8(0, 0, 0, 0);
-                } else {
-                    palette_lut[i] = ColorU8(r, g, b, a).premultiply();
-                }
+                palette_lut[i] = to_dst_pixel(ColorU8(r, g, b, a));
             } else {
                 palette_lut[i] = PremultipliedColorU8(0, 0, 0, 0);
             }
@@ -490,41 +555,45 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
             if (ihdr.color_type == 6 && ihdr.bit_depth == 8) {
                 const uint8_t* px = curr;
                 PremultipliedColorU8* dst = pixmap.pixels_mut() + y * ihdr.width;
-                uint32_t x = 0;
+                if (!options.premultiply_alpha) {
+                    std::memcpy(dst, px, static_cast<size_t>(ihdr.width) * 4);
+                } else {
+                    uint32_t x = 0;
 #if defined(__x86_64__) || defined(_M_X64)
-                __m128i all_255 = _mm_set1_epi32(static_cast<int>(0xFF000000));
-                for (; x + 4 <= ihdr.width; x += 4) {
-                    __m128i p = _mm_loadu_si128(reinterpret_cast<const __m128i*>(px));
-                    __m128i alphas = _mm_and_si128(p, all_255);
-                    __m128i cmp = _mm_cmpeq_epi32(alphas, all_255);
-                    int mask = _mm_movemask_epi8(cmp);
-                    if (mask == 0xFFFF) {
-                        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + x), p);
-                    } else {
-                        for (int k = 0; k < 4; ++k) {
-                            uint8_t a = px[k * 4 + 3];
-                            if (a == 255) {
-                                dst[x + k] = PremultipliedColorU8(px[k*4+0], px[k*4+1], px[k*4+2], 255);
-                            } else if (a == 0) {
-                                dst[x + k] = PremultipliedColorU8(0, 0, 0, 0);
-                            } else {
-                                dst[x + k] = ColorU8(px[k*4+0], px[k*4+1], px[k*4+2], a).premultiply();
+                    __m128i all_255 = _mm_set1_epi32(static_cast<int>(0xFF000000));
+                    for (; x + 4 <= ihdr.width; x += 4) {
+                        __m128i p = _mm_loadu_si128(reinterpret_cast<const __m128i*>(px));
+                        __m128i alphas = _mm_and_si128(p, all_255);
+                        __m128i cmp = _mm_cmpeq_epi32(alphas, all_255);
+                        int mask = _mm_movemask_epi8(cmp);
+                        if (mask == 0xFFFF) {
+                            _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + x), p);
+                        } else {
+                            for (int k = 0; k < 4; ++k) {
+                                uint8_t a = px[k * 4 + 3];
+                                if (a == 255) {
+                                    dst[x + k] = PremultipliedColorU8(px[k*4+0], px[k*4+1], px[k*4+2], 255);
+                                } else if (a == 0) {
+                                    dst[x + k] = PremultipliedColorU8(0, 0, 0, 0);
+                                } else {
+                                    dst[x + k] = ColorU8(px[k*4+0], px[k*4+1], px[k*4+2], a).premultiply();
+                                }
                             }
                         }
+                        px += 16;
                     }
-                    px += 16;
-                }
 #endif
-                for (; x < ihdr.width; ++x) {
-                    uint8_t a = px[3];
-                    if (a == 255) {
-                        dst[x] = PremultipliedColorU8(px[0], px[1], px[2], 255);
-                    } else if (a == 0) {
-                        dst[x] = PremultipliedColorU8(0, 0, 0, 0);
-                    } else {
-                        dst[x] = ColorU8(px[0], px[1], px[2], a).premultiply();
+                    for (; x < ihdr.width; ++x) {
+                        uint8_t a = px[3];
+                        if (a == 255) {
+                            dst[x] = PremultipliedColorU8(px[0], px[1], px[2], 255);
+                        } else if (a == 0) {
+                            dst[x] = PremultipliedColorU8(0, 0, 0, 0);
+                        } else {
+                            dst[x] = ColorU8(px[0], px[1], px[2], a).premultiply();
+                        }
+                        px += 4;
                     }
-                    px += 4;
                 }
             } else if (ihdr.color_type == 2 && ihdr.bit_depth == 8 && trns.empty()) {
                 const uint8_t* px = curr;
@@ -557,7 +626,7 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
             } else {
                 for (uint32_t x = 0; x < ihdr.width; ++x) {
                     ColorU8 c = extract_pixel(curr, x);
-                    pixmap.set_pixel(x, y, c.premultiply());
+                    pixmap.set_pixel(x, y, to_dst_pixel(c));
                 }
             }
         }
@@ -600,7 +669,7 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
                 for (uint32_t px = 0; px < pass_w; ++px) {
                     uint32_t dst_x = x0 + px * dx;
                     ColorU8 c = extract_pixel(curr_row.data(), px);
-                    pixmap.set_pixel(dst_x, dst_y, c.premultiply());
+                    pixmap.set_pixel(dst_x, dst_y, to_dst_pixel(c));
                 }
 
                 std::swap(curr_row, prior_row);
@@ -608,6 +677,10 @@ ImageResult<Image> decode_png(std::span<const uint8_t> png_data) {
         }
     } else {
         return ImageResult<Image>::fail(ImageError::UnsupportedFeature);
+    }
+
+    if (options.apply_exif_orientation && exif_orientation > 1) {
+        pixmap = apply_png_exif_orientation(pixmap, exif_orientation);
     }
 
     return ImageResult<Image>::success(std::move(pixmap));
@@ -646,8 +719,23 @@ ImageResult<std::vector<uint8_t>> encode_png(
         return ImageResult<std::vector<uint8_t>>::fail(ImageError::InvalidDimensions);
     }
 
+    // Check if image is completely opaque -> encode as RGB8 (color_type = 2) to save 25% scanline bytes
+    bool is_opaque = true;
+    for (uint32_t y = 0; y < h && is_opaque; ++y) {
+        const auto* px = pixmap.row(y);
+        for (uint32_t x = 0; x < w; ++x) {
+            if (px[x].a != 255) {
+                is_opaque = false;
+                break;
+            }
+        }
+    }
+
+    size_t bpp = is_opaque ? 3 : 4;
+    uint8_t color_type = is_opaque ? 2 : 6;
+
     std::vector<uint8_t> png_bytes;
-    png_bytes.reserve(w * h * 4 + 1024);
+    png_bytes.reserve(w * h * bpp + 1024);
 
     // 1. Signature
     png_bytes.insert(png_bytes.end(), PNG_SIGNATURE, PNG_SIGNATURE + 8);
@@ -656,15 +744,15 @@ ImageResult<std::vector<uint8_t>> encode_png(
     uint8_t ihdr[13];
     write_u32_be(ihdr, w);
     write_u32_be(ihdr + 4, h);
-    ihdr[8] = 8;  // bit depth: 8
-    ihdr[9] = 6;  // color type: RGBA
-    ihdr[10] = 0; // compression: deflate
-    ihdr[11] = 0; // filter: adaptive
-    ihdr[12] = 0; // interlace: none
+    ihdr[8] = 8;          // bit depth: 8
+    ihdr[9] = color_type; // color type: 2 (RGB) or 6 (RGBA)
+    ihdr[10] = 0;         // compression: deflate
+    ihdr[11] = 0;         // filter: adaptive
+    ihdr[12] = 0;         // interlace: none
     write_chunk(png_bytes, "IHDR", std::span<const uint8_t>(ihdr, 13));
 
-    // 3. Prepare Raw Scanlines with Adaptive Filtering
-    size_t row_bytes = static_cast<size_t>(w) * 4;
+    // 3. Prepare Raw Scanlines with Adaptive Filtering (All 5 Filters: None, Sub, Up, Average, Paeth)
+    size_t row_bytes = static_cast<size_t>(w) * bpp;
     std::vector<uint8_t> uncompressed_stream;
     uncompressed_stream.reserve((row_bytes + 1) * h);
 
@@ -673,61 +761,68 @@ ImageResult<std::vector<uint8_t>> encode_png(
 
     std::vector<uint8_t> sub_filtered(row_bytes);
     std::vector<uint8_t> up_filtered(row_bytes);
+    std::vector<uint8_t> avg_filtered(row_bytes);
     std::vector<uint8_t> paeth_filtered(row_bytes);
 
     for (uint32_t y = 0; y < h; ++y) {
         const auto* px = pixmap.row(y);
-        for (uint32_t x = 0; x < w; ++x) {
-            ColorU8 c = px[x].demultiply();
-            raw_row[x * 4 + 0] = c.red();
-            raw_row[x * 4 + 1] = c.green();
-            raw_row[x * 4 + 2] = c.blue();
-            raw_row[x * 4 + 3] = c.alpha();
+        if (is_opaque) {
+            for (uint32_t x = 0; x < w; ++x) {
+                raw_row[x * 3 + 0] = px[x].r;
+                raw_row[x * 3 + 1] = px[x].g;
+                raw_row[x * 3 + 2] = px[x].b;
+            }
+        } else {
+            for (uint32_t x = 0; x < w; ++x) {
+                ColorU8 c = px[x].demultiply();
+                raw_row[x * 4 + 0] = c.red();
+                raw_row[x * 4 + 1] = c.green();
+                raw_row[x * 4 + 2] = c.blue();
+                raw_row[x * 4 + 3] = c.alpha();
+            }
         }
 
         if (compression_level <= 3) {
-            // Fast mode: use Sub filter directly
             uncompressed_stream.push_back(1);
             for (size_t x = 0; x < row_bytes; ++x) {
                 uint8_t val = raw_row[x];
-                uint8_t a = (x >= 4) ? raw_row[x - 4] : 0;
+                uint8_t a = (x >= bpp) ? raw_row[x - bpp] : 0;
                 uncompressed_stream.push_back(static_cast<uint8_t>(val - a));
             }
             continue;
         }
 
-        // Evaluate Filter Types (None, Sub, Up, Paeth) using Sum of Absolute Differences (SAD)
         uint64_t sad_none = 0;
         uint64_t sad_sub = 0;
         uint64_t sad_up = 0;
+        uint64_t sad_avg = 0;
         uint64_t sad_paeth = 0;
 
         for (size_t x = 0; x < row_bytes; ++x) {
             uint8_t val = raw_row[x];
-            uint8_t a = (x >= 4) ? raw_row[x - 4] : 0;
+            uint8_t a = (x >= bpp) ? raw_row[x - bpp] : 0;
             uint8_t b = (y > 0) ? prior_row[x] : 0;
-            uint8_t c = (y > 0 && x >= 4) ? prior_row[x - 4] : 0;
+            uint8_t c = (y > 0 && x >= bpp) ? prior_row[x - bpp] : 0;
 
-            // None (0)
-            sad_none += val;
+            sad_none += (val > 128 ? 256 - val : val);
 
-            // Sub (1)
             uint8_t f_sub = static_cast<uint8_t>(val - a);
             sub_filtered[x] = f_sub;
             sad_sub += (f_sub > 128 ? 256 - f_sub : f_sub);
 
-            // Up (2)
             uint8_t f_up = static_cast<uint8_t>(val - b);
             up_filtered[x] = f_up;
             sad_up += (f_up > 128 ? 256 - f_up : f_up);
 
-            // Paeth (4)
+            uint8_t f_avg = static_cast<uint8_t>(val - ((static_cast<int>(a) + static_cast<int>(b)) >> 1));
+            avg_filtered[x] = f_avg;
+            sad_avg += (f_avg > 128 ? 256 - f_avg : f_avg);
+
             uint8_t f_paeth = static_cast<uint8_t>(val - paeth_predictor(a, b, c));
             paeth_filtered[x] = f_paeth;
             sad_paeth += (f_paeth > 128 ? 256 - f_paeth : f_paeth);
         }
 
-        // Choose optimal filter
         uint8_t best_filter = 0;
         const uint8_t* best_data = raw_row.data();
         uint64_t min_sad = sad_none;
@@ -741,6 +836,11 @@ ImageResult<std::vector<uint8_t>> encode_png(
             min_sad = sad_up;
             best_filter = 2;
             best_data = up_filtered.data();
+        }
+        if (sad_avg < min_sad) {
+            min_sad = sad_avg;
+            best_filter = 3;
+            best_data = avg_filtered.data();
         }
         if (sad_paeth < min_sad) {
             best_filter = 4;
@@ -768,7 +868,7 @@ ImageResult<std::vector<uint8_t>> encode_png(
     return ImageResult<std::vector<uint8_t>>::success(std::move(png_bytes));
 }
 
-ImageResult<Image> decode_png_file(const std::string& file_path) {
+ImageResult<Image> decode_png_file(const std::string& file_path, DecodeOptions options) {
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         return ImageResult<Image>::fail(ImageError::IOError);
@@ -785,7 +885,7 @@ ImageResult<Image> decode_png_file(const std::string& file_path) {
         return ImageResult<Image>::fail(ImageError::IOError);
     }
 
-    return decode_png(buffer);
+    return decode_png(buffer, options);
 }
 
 bool save_png_file(

@@ -11,7 +11,10 @@
 namespace nisaba::image {
 
 /// Decode QOI (Quite OK Image) image from memory buffer into a Nisaba Pixmap.
-ImageResult<Pixmap> decode_qoi(std::span<const uint8_t> qoi_data);
+ImageResult<Pixmap> decode_qoi(
+    std::span<const uint8_t> qoi_data,
+    DecodeOptions options = {}
+);
 
 /// Query QOI header information without decoding all pixel data.
 ImageResult<ImageInfo> probe_qoi(std::span<const uint8_t> qoi_data);
@@ -24,7 +27,10 @@ ImageResult<std::vector<uint8_t>> encode_qoi(
 );
 
 /// Helper to decode QOI from a file path.
-ImageResult<Pixmap> decode_qoi_file(const std::string& file_path);
+ImageResult<Pixmap> decode_qoi_file(
+    const std::string& file_path,
+    DecodeOptions options = {}
+);
 
 /// Helper to encode and save a PixmapRef into a QOI file.
 bool save_qoi_file(

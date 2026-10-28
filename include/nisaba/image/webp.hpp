@@ -53,7 +53,10 @@ struct WebPAnimation {
 
 /// Decode WebP image from memory buffer into a Nisaba Pixmap.
 /// Supports Lossless WebP (VP8L), Lossy WebP (VP8), Animated WebP (first frame), and Alpha containers (VP8X / ALPH).
-ImageResult<Pixmap> decode_webp(std::span<const uint8_t> webp_data);
+ImageResult<Pixmap> decode_webp(
+    std::span<const uint8_t> webp_data,
+    DecodeOptions options = {}
+);
 
 /// Decode multi-frame WebP animation from memory buffer
 ImageResult<WebPAnimation> decode_webp_animation(std::span<const uint8_t> webp_data);
@@ -67,7 +70,7 @@ bool is_animated_webp(std::span<const uint8_t> webp_data);
 /// Query WebP header information without decoding all pixel data.
 ImageResult<ImageInfo> probe_webp(std::span<const uint8_t> webp_data);
 
-/// Encode a PixmapRef into WebP format in memory (Lossless VP8L).
+/// Encode a PixmapRef into WebP format in memory (Lossless VP8L or Lossy VP8).
 ImageResult<std::vector<uint8_t>> encode_webp(
     PixmapRef pixmap,
     bool lossless = true,
@@ -75,7 +78,10 @@ ImageResult<std::vector<uint8_t>> encode_webp(
 );
 
 /// Helper to decode WebP from a file path.
-ImageResult<Pixmap> decode_webp_file(const std::string& file_path);
+ImageResult<Pixmap> decode_webp_file(
+    const std::string& file_path,
+    DecodeOptions options = {}
+);
 
 /// Helper to encode and save a PixmapRef into a WebP file.
 bool save_webp_file(

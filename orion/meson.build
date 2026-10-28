@@ -63,6 +63,9 @@ orion_sources = files(
   'src/orionimg/jpeg.cpp',
   'src/orionimg/qoi.cpp',
   'src/orionimg/webp.cpp',
+  'src/orionimg/bmp.cpp',
+  'src/orionimg/ppm.cpp',
+  'src/orionimg/hdr.cpp',
   'src/orionimg/orionimg.cpp',
 )
 

@@ -64,6 +64,9 @@ nisaba_sources = files(
   'src/image/jpeg.cpp',
   'src/image/qoi.cpp',
   'src/image/webp.cpp',
+  'src/image/bmp.cpp',
+  'src/image/ppm.cpp',
+  'src/image/hdr.cpp',
   'src/image/image_io.cpp',
 )
 
@@ -206,6 +209,8 @@ if get_option('enable_markdown')
     'src/markdown/document.cpp',
     'src/markdown/style.cpp',
     'src/markdown/renderer.cpp',
+    'src/markdown/math_engine.cpp',
+    'src/markdown/diagram_engine.cpp',
   )
 endif
 
@@ -286,6 +291,9 @@ if get_option('enable_orion')
     'orion/src/orionimg/jpeg.cpp',
     'orion/src/orionimg/qoi.cpp',
     'orion/src/orionimg/webp.cpp',
+    'orion/src/orionimg/bmp.cpp',
+    'orion/src/orionimg/ppm.cpp',
+    'orion/src/orionimg/hdr.cpp',
     'orion/src/orionimg/orionimg.cpp',
   )
 endif

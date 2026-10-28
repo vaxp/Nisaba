@@ -661,6 +661,134 @@ void test_markdown_vector_pdf_exporter() {
     std::cout << "  Vector PDF Export Pipeline verified. Generated " << pdf_bytes.size() << " bytes." << std::endl;
 }
 
+void test_markdown_math_engine() {
+    std::cout << "[Test] Markdown: LaTeX Math Engine..." << std::endl;
+
+    // Parser: block and inline detection
+    auto doc = MarkdownParser::parse(
+        "$$\n\\frac{a}{b} + \\sqrt{x^2}\n$$\n"
+        "\n"
+        "$$ \\sum_{i=1}^{n} i $$\n"
+        "\n"
+        "```math\n\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}\n```\n"
+        "\n"
+        "Euler: $e^{i\\pi} + 1 = 0$ costs $5 and $6 today.\n");
+    assert(doc->children.size() == 4);
+    assert(doc->children[0]->type == BlockType::MathBlock);
+    assert(doc->children[1]->type == BlockType::MathBlock);
+    assert(doc->children[2]->type == BlockType::MathBlock);
+    assert(doc->children[3]->type == BlockType::Paragraph);
+
+    int math_spans = 0;
+    for (const auto& s : doc->children[3]->inlines) {
+        if (s.type == InlineType::Math) math_spans++;
+    }
+    assert(math_spans == 1); // currency "$5 and $6" must not be treated as math
+
+    // Engine: parse, layout, plain-text extraction
+    text::FontSystem fonts;
+    text::GlyphCache cache;
+    auto frac = MathEngine::parse("\\frac{a}{b}", true);
+    MathEngine::layout(*frac, 20.0f, true, fonts);
+    assert(frac->width > 0.0f && frac->height() > 20.0f);
+    assert(MathEngine::to_plain_text(*frac) == "(a)/(b)");
+
+    auto mat = MathEngine::parse("\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}", true);
+    MathEngine::layout(*mat, 20.0f, true, fonts);
+    assert(mat->height() > 40.0f);
+    assert(MathEngine::to_plain_text(*mat) == "[1, 2; 3, 4]");
+
+    auto sum = MathEngine::parse("\\sum_{i=1}^{n} i", true);
+    assert(MathEngine::to_plain_text(*sum).find("∑") != std::string::npos);
+
+    // Render onto CPU canvas
+    auto pixmap = Pixmap::create(300, 120);
+    assert(pixmap.has_value());
+    Canvas canvas(*pixmap);
+    canvas.clear(Color::from_rgba8(255, 255, 255, 255));
+    MathEngine::render(canvas, *frac, 20.0f, 20.0f, Color::from_rgba8(0, 0, 0, 255), fonts, cache);
+
+    std::cout << "  Math parser, layout, plain-text and render verified." << std::endl;
+}
+
+void test_markdown_diagram_engine() {
+    std::cout << "[Test] Markdown: Mermaid Diagram Engine..." << std::endl;
+
+    auto doc = MarkdownParser::parse(
+        "```mermaid\nflowchart LR\n  A[Start] --> B{Ok?}\n  B -->|yes| C((Done))\n  B -->|no| A\n```\n");
+    assert(doc->children.size() == 1);
+    assert(doc->children[0]->type == BlockType::Diagram);
+
+    auto flow = DiagramEngine::parse(doc->children[0]->source);
+    assert(flow->kind == DiagramKind::Flowchart);
+    assert(flow->direction == DiagramDirection::LeftRight);
+    assert(flow->nodes.size() == 3);
+    assert(flow->edges.size() == 3);
+    assert(flow->edges[1].label == "yes");
+
+    text::FontSystem fonts;
+    text::GlyphCache cache;
+    auto style = MarkdownStyle::dark_theme();
+    float h = DiagramEngine::layout(*flow, 600.0f, style, fonts);
+    assert(h > 40.0f);
+    assert(flow->nodes[1].x > flow->nodes[0].x); // LR: B placed right of A
+
+    auto seq = DiagramEngine::parse(
+        "sequenceDiagram\n  participant A as Alice\n  A->>B: Hello\n  B-->>A: Hi\n");
+    assert(seq->kind == DiagramKind::Sequence);
+    assert(seq->actors.size() == 2);
+    assert(seq->messages.size() == 2);
+
+    auto chart = DiagramEngine::parse(
+        "xychart-beta\n  title \"Sales\"\n  x-axis [jan, feb, mar]\n  bar [10, 40, 25]\n  line [12, 30, 28]\n");
+    assert(chart->kind == DiagramKind::XYChart);
+    assert(chart->x_categories.size() == 3);
+    assert(chart->series.size() == 2);
+
+    auto pie = DiagramEngine::parse("pie title Pets\n  \"Dogs\" : 40\n  \"Cats\" : 60\n");
+    assert(pie->kind == DiagramKind::PieChart);
+    assert(pie->pie_slices.size() == 2);
+
+    // Render every diagram family onto a CPU canvas
+    for (auto* model : {flow.get(), seq.get(), chart.get(), pie.get()}) {
+        float mh = DiagramEngine::layout(*model, 600.0f, style, fonts);
+        auto pixmap = Pixmap::create(640, static_cast<uint32_t>(mh + 20.0f));
+        assert(pixmap.has_value());
+        Canvas canvas(*pixmap);
+        canvas.clear(Color::from_rgba8(10, 14, 24, 255));
+        DiagramEngine::render(canvas, *model, 10.0f, 10.0f, 600.0f, style, fonts, cache);
+    }
+
+    std::cout << "  Flowchart, sequence, xychart and pie parsing, layout and render verified." << std::endl;
+}
+
+void test_markdown_math_diagram_document_and_pdf() {
+    std::cout << "[Test] Markdown: Math & Diagram in Document + PDF..." << std::endl;
+
+    auto doc = MarkdownDocument::from_string(
+        "# Doc\n\n$$ x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a} $$\n\n"
+        "```mermaid\ngraph TD\n  A-->B\n```\n");
+    assert(doc.is_valid());
+
+    auto style = MarkdownStyle::dark_theme();
+    text::FontSystem fonts;
+    text::GlyphCache cache;
+    float h = doc.layout(600.0f, style, fonts, cache);
+    assert(h > 100.0f);
+    assert(doc.root()->children[1]->math != nullptr);
+    assert(doc.root()->children[2]->diagram != nullptr);
+
+    auto pixmap = Pixmap::create(640, static_cast<uint32_t>(h + 20.0f));
+    assert(pixmap.has_value());
+    Canvas canvas(*pixmap);
+    MarkdownRenderer::render(canvas, doc, 20.0f, 10.0f, 600.0f, style, fonts, cache);
+
+    auto pdf = MarkdownPdfExporter::export_to_bytes(doc, MarkdownStyle::light_theme(), fonts, cache);
+    assert(!pdf.empty());
+
+    std::cout << "  Math & Diagram document layout, CPU render and PDF export verified." << std::endl;
+}
+
 int main() {
     std::cout << "=== NISABA SOVEREIGN MARKDOWN ENGINE TESTS ===" << std::endl;
 
@@ -682,7 +810,10 @@ int main() {
     test_markdown_interactive_hit_test();
     test_markdown_advanced_layout_and_recursion();
     test_markdown_vector_pdf_exporter();
+    test_markdown_math_engine();
+    test_markdown_diagram_engine();
+    test_markdown_math_diagram_document_and_pdf();
 
-    std::cout << "\n>>> ALL 16 MARKDOWN TEST SUITES PASSED WITH HIGHEST DISTINCTION! <<<\n" << std::endl;
+    std::cout << "\n>>> ALL 19 MARKDOWN TEST SUITES PASSED! <<<\n" << std::endl;
     return 0;
 }

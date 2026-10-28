@@ -652,6 +652,123 @@ inline void write_fixed_distance(BitWriter& writer, int dist_code) {
     writer.write_bits(reverse_bits(dist_code, 5), 5);
 }
 
+struct DeflateEncTable {
+    std::vector<uint8_t> lengths;
+    std::vector<uint16_t> codes_rev;
+};
+
+DeflateEncTable build_deflate_huff_table(std::span<const uint32_t> freqs, int max_bits) {
+    int n = static_cast<int>(freqs.size());
+    DeflateEncTable out;
+    out.lengths.assign(n, 0);
+    out.codes_rev.assign(n, 0);
+
+    struct Node {
+        uint64_t freq;
+        int sym;
+        int left;
+        int right;
+    };
+
+    std::vector<Node> nodes;
+    for (int i = 0; i < n; ++i) {
+        if (freqs[i] > 0) {
+            nodes.push_back({freqs[i], i, -1, -1});
+        }
+    }
+
+    if (nodes.empty()) {
+        nodes.push_back({1, 0, -1, -1});
+        nodes.push_back({1, 1, -1, -1});
+    } else if (nodes.size() == 1) {
+        int alt = (nodes[0].sym == 0) ? 1 : 0;
+        nodes.push_back({1, alt, -1, -1});
+    }
+
+    std::vector<int> active(nodes.size());
+    for (size_t i = 0; i < nodes.size(); ++i) active[i] = static_cast<int>(i);
+
+    while (active.size() > 1) {
+        std::sort(active.begin(), active.end(), [&](int a, int b) {
+            if (nodes[a].freq != nodes[b].freq) return nodes[a].freq > nodes[b].freq;
+            return a > b;
+        });
+        int n1 = active.back(); active.pop_back();
+        int n2 = active.back(); active.pop_back();
+        int parent = static_cast<int>(nodes.size());
+        nodes.push_back({nodes[n1].freq + nodes[n2].freq, -1, n1, n2});
+        active.push_back(parent);
+    }
+
+    auto assign_depth = [&](auto& self, int idx, int depth) -> void {
+        if (nodes[idx].sym >= 0) {
+            out.lengths[nodes[idx].sym] = static_cast<uint8_t>(std::clamp(depth, 1, max_bits));
+            return;
+        }
+        self(self, nodes[idx].left, depth + 1);
+        self(self, nodes[idx].right, depth + 1);
+    };
+    assign_depth(assign_depth, active[0], 0);
+
+    // Enforce exact Kraft sum: sum(2^(max_bits - len)) == (1 << max_bits)
+    int32_t target = 1 << max_bits;
+    int32_t kraft = 0;
+    for (int i = 0; i < n; ++i) {
+        if (out.lengths[i] > 0) {
+            kraft += (1 << (max_bits - out.lengths[i]));
+        }
+    }
+
+    while (kraft > target) {
+        int best = -1;
+        for (int i = n - 1; i >= 0; --i) {
+            if (out.lengths[i] > 0 && out.lengths[i] < max_bits) {
+                if (best < 0 || out.lengths[i] > out.lengths[best]) best = i;
+            }
+        }
+        if (best < 0) break;
+        kraft -= (1 << (max_bits - out.lengths[best]));
+        out.lengths[best]++;
+        kraft += (1 << (max_bits - out.lengths[best]));
+    }
+
+    while (kraft < target) {
+        int32_t diff = target - kraft;
+        int best = -1;
+        for (int i = 0; i < n; ++i) {
+            if (out.lengths[i] > 1) {
+                int32_t gain = 1 << (max_bits - out.lengths[i]);
+                if (gain <= diff) {
+                    if (best < 0 || out.lengths[i] > out.lengths[best]) best = i;
+                }
+            }
+        }
+        if (best < 0) break;
+        kraft += (1 << (max_bits - out.lengths[best]));
+        out.lengths[best]--;
+    }
+
+    int bl_count[16]{};
+    for (uint8_t len : out.lengths) {
+        if (len > 0) bl_count[len]++;
+    }
+    int next_code[16]{};
+    int code = 0;
+    for (int bits = 1; bits <= max_bits; ++bits) {
+        code = (code + bl_count[bits - 1]) << 1;
+        next_code[bits] = code;
+    }
+    for (int i = 0; i < n; ++i) {
+        uint8_t len = out.lengths[i];
+        if (len > 0) {
+            int c = next_code[len]++;
+            out.codes_rev[i] = static_cast<uint16_t>(reverse_bits(static_cast<uint32_t>(c), len));
+        }
+    }
+
+    return out;
+}
+
 } // namespace
 
 ImageResult<std::vector<uint8_t>> deflate_compress(
@@ -671,7 +788,6 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
             writer.write_bits(0, 2); // BTYPE 00
             writer.flush();
 
-            // Direct write len and ~len
             writer.write_bits(chunk & 0xFF, 8);
             writer.write_bits((chunk >> 8) & 0xFF, 8);
             uint16_t nlen = ~chunk;
@@ -685,10 +801,6 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
 
         return ImageResult<std::vector<uint8_t>>::success(std::move(writer).take());
     }
-
-    // Fast LZ77 with Fixed Huffman encoding
-    writer.write_bits(1, 1); // BFINAL = 1
-    writer.write_bits(1, 2); // BTYPE 01 (Fixed Huffman)
 
     constexpr size_t HASH_BITS = 15;
     constexpr size_t HASH_SIZE = 1 << HASH_BITS;
@@ -710,7 +822,21 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
     size_t src_len = uncompressed_data.size();
     size_t i = 0;
 
-    int max_chain = (level >= 6) ? 32 : (level >= 4 ? 16 : 4);
+    int max_chain = (level >= 7) ? 64 : (level >= 5 ? 32 : (level >= 3 ? 16 : 4));
+
+    struct LzToken {
+        uint16_t sym{0};
+        uint8_t len_ebits{0};
+        uint8_t len_eval{0};
+        uint8_t dist_sym{0};
+        uint8_t dist_ebits{0};
+        uint16_t dist_eval{0};
+    };
+    std::vector<LzToken> tokens;
+    tokens.reserve(src_len / 2 + 16);
+
+    std::array<uint32_t, 286> lit_freq{};
+    std::array<uint32_t, 30> dist_freq{};
 
     while (i < src_len) {
         uint32_t best_len = 0;
@@ -727,7 +853,6 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
                 size_t dist = i - match_pos;
                 if (dist > WINDOW_SIZE) break;
 
-                // Check match length
                 size_t max_m = std::min(size_t(258), src_len - i);
                 size_t m = 0;
                 while (m < max_m && src[i + m] == src[match_pos + m]) {
@@ -744,30 +869,28 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
         }
 
         if (best_len >= 3) {
-            // Find length code
             uint32_t len_idx = 0;
             while (len_idx < 28 && LENGTH_BASE[len_idx + 1] <= best_len) {
                 ++len_idx;
             }
-            write_fixed_symbol(writer, 257 + len_idx);
-            uint8_t ex_len = LENGTH_EXTRA[len_idx];
-            if (ex_len > 0) {
-                writer.write_bits(best_len - LENGTH_BASE[len_idx], ex_len);
-            }
-
-            // Find distance code
             uint32_t dist_idx = 0;
             while (dist_idx < 29 && DIST_BASE[dist_idx + 1] <= best_dist) {
                 ++dist_idx;
             }
-            write_fixed_distance(writer, dist_idx);
-            uint8_t ex_dist = DIST_EXTRA[dist_idx];
-            if (ex_dist > 0) {
-                writer.write_bits(best_dist - DIST_BASE[dist_idx], ex_dist);
-            }
 
-            if (level >= 4) {
-                // Insert intermediate hashes for high compression
+            LzToken tk;
+            tk.sym = static_cast<uint16_t>(257 + len_idx);
+            tk.len_ebits = LENGTH_EXTRA[len_idx];
+            tk.len_eval = static_cast<uint8_t>(best_len - LENGTH_BASE[len_idx]);
+            tk.dist_sym = static_cast<uint8_t>(dist_idx);
+            tk.dist_ebits = DIST_EXTRA[dist_idx];
+            tk.dist_eval = static_cast<uint16_t>(best_dist - DIST_BASE[dist_idx]);
+            tokens.push_back(tk);
+
+            lit_freq[tk.sym]++;
+            dist_freq[tk.dist_sym]++;
+
+            if (level >= 3) {
                 for (size_t k = 1; k < best_len && (i + k + 2) < src_len; ++k) {
                     uint32_t hk = hash3(src + i + k);
                     prev[(i + k) & WINDOW_MASK] = head[hk];
@@ -776,15 +899,162 @@ ImageResult<std::vector<uint8_t>> deflate_compress(
             }
             i += best_len;
         } else {
-            // Emit literal
-            write_fixed_symbol(writer, src[i]);
+            LzToken tk;
+            tk.sym = src[i];
+            tokens.push_back(tk);
+            lit_freq[tk.sym]++;
             ++i;
         }
     }
 
-    // End of block code (256)
-    write_fixed_symbol(writer, 256);
-    writer.flush();
+    lit_freq[256] = 1; // EOB
+
+    // Ensure at least 2 distance symbols have non-zero frequency for valid tree
+    int active_dists = 0;
+    for (uint32_t f : dist_freq) if (f > 0) ++active_dists;
+    if (active_dists == 0) {
+        dist_freq[0] = 1;
+        dist_freq[1] = 1;
+    } else if (active_dists == 1) {
+        if (dist_freq[0] == 0) dist_freq[0] = 1;
+        else dist_freq[1] = 1;
+    }
+
+    // Estimate Fixed Huffman cost
+    uint64_t fixed_bits = 3 + get_fixed_lit_code(256).len;
+    for (const auto& tk : tokens) {
+        fixed_bits += get_fixed_lit_code(tk.sym).len;
+        if (tk.sym >= 257) {
+            fixed_bits += tk.len_ebits + 5 + tk.dist_ebits;
+        }
+    }
+
+    bool use_dynamic = false;
+    DeflateEncTable dyn_lit;
+    DeflateEncTable dyn_dist;
+    DeflateEncTable dyn_clen;
+    uint32_t hlit = 286;
+    uint32_t hdist = 30;
+    struct ClenSym {
+        uint8_t sym;
+        uint8_t ebits;
+        uint8_t eval;
+    };
+    std::vector<ClenSym> clen_stream;
+
+    if (level >= 2) {
+        dyn_lit = build_deflate_huff_table(lit_freq, 15);
+        dyn_dist = build_deflate_huff_table(dist_freq, 15);
+
+        while (hlit > 257 && dyn_lit.lengths[hlit - 1] == 0) --hlit;
+        while (hdist > 2 && dyn_dist.lengths[hdist - 1] == 0) --hdist;
+
+        std::vector<uint8_t> all_lengths;
+        all_lengths.reserve(hlit + hdist);
+        for (uint32_t k = 0; k < hlit; ++k) all_lengths.push_back(dyn_lit.lengths[k]);
+        for (uint32_t k = 0; k < hdist; ++k) all_lengths.push_back(dyn_dist.lengths[k]);
+
+        std::array<uint32_t, 19> clen_freq{};
+        size_t k = 0;
+        while (k < all_lengths.size()) {
+            uint8_t v = all_lengths[k];
+            if (v == 0) {
+                size_t run = 1;
+                while (k + run < all_lengths.size() && all_lengths[k + run] == 0 && run < 138) {
+                    ++run;
+                }
+                if (run >= 11) {
+                    clen_stream.push_back({18, 7, static_cast<uint8_t>(run - 11)});
+                    clen_freq[18]++;
+                    k += run;
+                } else if (run >= 3) {
+                    clen_stream.push_back({17, 3, static_cast<uint8_t>(run - 3)});
+                    clen_freq[17]++;
+                    k += run;
+                } else {
+                    clen_stream.push_back({0, 0, 0});
+                    clen_freq[0]++;
+                    ++k;
+                }
+            } else {
+                clen_stream.push_back({v, 0, 0});
+                clen_freq[v]++;
+                ++k;
+            }
+        }
+
+        dyn_clen = build_deflate_huff_table(clen_freq, 7);
+
+        uint64_t dyn_bits = 3 + 5 + 5 + 4 + 19 * 3;
+        for (const auto& cs : clen_stream) {
+            dyn_bits += dyn_clen.lengths[cs.sym] + cs.ebits;
+        }
+        for (const auto& tk : tokens) {
+            dyn_bits += dyn_lit.lengths[tk.sym];
+            if (tk.sym >= 257) {
+                dyn_bits += tk.len_ebits + dyn_dist.lengths[tk.dist_sym] + tk.dist_ebits;
+            }
+        }
+        dyn_bits += dyn_lit.lengths[256];
+
+        if (dyn_bits < fixed_bits) {
+            use_dynamic = true;
+        }
+    }
+
+    if (use_dynamic) {
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(2, 2); // BTYPE = 10 (Dynamic Huffman)
+        writer.write_bits(hlit - 257, 5);
+        writer.write_bits(hdist - 1, 5);
+        writer.write_bits(19 - 4, 4); // hclen = 19
+
+        for (int idx = 0; idx < 19; ++idx) {
+            writer.write_bits(dyn_clen.lengths[CODE_LEN_ORDER[idx]], 3);
+        }
+
+        for (const auto& cs : clen_stream) {
+            writer.write_bits(dyn_clen.codes_rev[cs.sym], dyn_clen.lengths[cs.sym]);
+            if (cs.ebits > 0) {
+                writer.write_bits(cs.eval, cs.ebits);
+            }
+        }
+
+        for (const auto& tk : tokens) {
+            writer.write_bits(dyn_lit.codes_rev[tk.sym], dyn_lit.lengths[tk.sym]);
+            if (tk.sym >= 257) {
+                if (tk.len_ebits > 0) {
+                    writer.write_bits(tk.len_eval, tk.len_ebits);
+                }
+                writer.write_bits(dyn_dist.codes_rev[tk.dist_sym], dyn_dist.lengths[tk.dist_sym]);
+                if (tk.dist_ebits > 0) {
+                    writer.write_bits(tk.dist_eval, tk.dist_ebits);
+                }
+            }
+        }
+
+        writer.write_bits(dyn_lit.codes_rev[256], dyn_lit.lengths[256]);
+        writer.flush();
+    } else {
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(1, 2); // BTYPE = 01 (Fixed Huffman)
+
+        for (const auto& tk : tokens) {
+            write_fixed_symbol(writer, tk.sym);
+            if (tk.sym >= 257) {
+                if (tk.len_ebits > 0) {
+                    writer.write_bits(tk.len_eval, tk.len_ebits);
+                }
+                write_fixed_distance(writer, tk.dist_sym);
+                if (tk.dist_ebits > 0) {
+                    writer.write_bits(tk.dist_eval, tk.dist_ebits);
+                }
+            }
+        }
+
+        write_fixed_symbol(writer, 256);
+        writer.flush();
+    }
 
     return ImageResult<std::vector<uint8_t>>::success(std::move(writer).take());
 }

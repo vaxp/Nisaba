@@ -79,7 +79,7 @@ ImageResult<ImageInfo> probe_qoi(std::span<const uint8_t> qoi_data) {
     return ImageResult<ImageInfo>::success(info);
 }
 
-ImageResult<Pixmap> decode_qoi(std::span<const uint8_t> qoi_data) {
+ImageResult<Pixmap> decode_qoi(std::span<const uint8_t> qoi_data, DecodeOptions options) {
     auto info_res = probe_qoi(qoi_data);
     if (!info_res) {
         return ImageResult<Pixmap>::fail(info_res.error);
@@ -105,7 +105,9 @@ ImageResult<Pixmap> decode_qoi(std::span<const uint8_t> qoi_data) {
     size_t end = qoi_data.size() - sizeof(QOI_PADDING);
 
     auto store_pixel = [&](ColorU8 c) noexcept {
-        if (c.alpha() == 255) {
+        if (!options.premultiply_alpha) {
+            dst[px_idx++] = PremultipliedColorU8::from_rgba_unchecked(c.r, c.g, c.b, c.a);
+        } else if (c.alpha() == 255) {
             dst[px_idx++] = PremultipliedColorU8(c.red(), c.green(), c.blue(), 255);
         } else if (c.alpha() == 0) {
             dst[px_idx++] = PremultipliedColorU8(0, 0, 0, 0);
@@ -280,7 +282,7 @@ ImageResult<std::vector<uint8_t>> encode_qoi(
     return ImageResult<std::vector<uint8_t>>::success(std::move(out));
 }
 
-ImageResult<Pixmap> decode_qoi_file(const std::string& file_path) {
+ImageResult<Pixmap> decode_qoi_file(const std::string& file_path, DecodeOptions options) {
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         return ImageResult<Pixmap>::fail(ImageError::IOError);
@@ -297,7 +299,7 @@ ImageResult<Pixmap> decode_qoi_file(const std::string& file_path) {
         return ImageResult<Pixmap>::fail(ImageError::IOError);
     }
 
-    return decode_qoi(buffer);
+    return decode_qoi(buffer, options);
 }
 
 bool save_qoi_file(

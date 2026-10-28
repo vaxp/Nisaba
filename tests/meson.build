@@ -190,6 +190,13 @@ test_webp_exe = executable('test_webp',
 )
 test('webp_test', test_webp_exe)
 
+# Sovereign Extended Codecs (BMP, PPM, HDR) tests
+test_codecs_extended_exe = executable('test_codecs_extended',
+  'test_codecs_extended.cpp',
+  dependencies : nisaba_dep
+)
+test('codecs_extended_test', test_codecs_extended_exe)
+
 if get_option('enable_gpu')
   test_gpu_exe = executable('test_gpu',
     'test_gpu.cpp',
